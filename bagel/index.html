@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BAGEL 架构图解</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* 布局：单栏说明文，三张图各配一段话；图固定白底论文配色，和 MAGI-2 那页同一套颜色语言 */
+:root{
+  --bg:#F3F4F7; --panel:#FFFFFF; --ink:#1C2330; --muted:#5E6675; --line:#D8DBE2; --accent:#2B4EA2; --accent-soft:#E6ECF9;
+  --sans:"IBM Plex Sans","PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){--bg:#14171D;--panel:#1B1F27;--ink:#E6E9EF;--muted:#9AA3B2;--line:#2D333E;--accent:#93ADF2;--accent-soft:#222B44;color-scheme:dark}
+}
+:root[data-theme="dark"]{--bg:#14171D;--panel:#1B1F27;--ink:#E6E9EF;--muted:#9AA3B2;--line:#2D333E;--accent:#93ADF2;--accent-soft:#222B44;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.7 var(--sans)}
+main{max-width:1040px;margin:0 auto;padding:36px 20px 64px;display:flex;flex-direction:column;gap:34px}
+h1{font-size:26px;font-weight:600;margin:0 0 8px;text-wrap:balance}
+h2{font-size:18px;font-weight:600;margin:0 0 8px;text-wrap:balance}
+p{margin:0 0 10px;max-width:68ch}
+.lede{color:var(--muted)}
+ul{margin:0 0 10px;padding-left:20px;max-width:68ch}
+li{margin-bottom:4px}
+code{font:13px var(--mono);background:var(--accent-soft);padding:1px 5px;border-radius:4px}
+figure{margin:14px 0 0}
+.fig{overflow-x:auto;background:#fff;border:1px solid var(--line);border-radius:8px;padding:14px;line-height:0}
+figcaption{color:var(--muted);font-size:13px;margin-top:8px;max-width:72ch}
+table{border-collapse:collapse;font-size:14px;width:100%;max-width:900px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:12.5px}
+.tbl{overflow-x:auto}
+.src{color:var(--muted);font-size:13px;border-top:1px solid var(--line);padding-top:16px}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>BAGEL 架构图解</h1>
+  <p class="lede">一句话：BAGEL 是一个 Qwen2.5-7B 语言模型，里面每一层的权重都备了两套。一套管“看懂”（文本和 ViT 图像 token），一套管“画出来”（VAE 图像 token）。两套权重各算各的 token，但在同一次自注意力里互相看得见。</p>
+</header>
+
+<section>
+  <h2>1. 整体：三种 token 进同一条序列</h2>
+  <p>图像会以两种身份进入模型。要让模型看懂它，就走 SigLIP2 ViT，得到语义 token。要让模型生成或修改它，就走 FLUX VAE，得到像素级的 latent token。两种 token 和文本 token 交错排在一条序列里。</p>
+  <p>输出也分两头：文本位置接语言模型头，预测下一个词；VAE 位置接一个线性层，预测流匹配的速度场，采样后用 VAE 解码成图。</p>
+  <figure><div class="fig" id="fig1"></div>
+  <figcaption>蓝色是理解这套权重，橙色是生成这套权重，绿色是两边共用的部分。</figcaption></figure>
+</section>
+
+<section>
+  <h2>2. 一层里面：两套权重，一次注意力</h2>
+  <p>这就是 MoT（Mixture-of-Transformers）。每个 token 只走自己那一套的 Norm、Q/K/V 投影、输出投影和 MLP。唯一把两边连起来的是中间那次自注意力：两套投影算出的 Q、K、V 按原位置拼回一条序列，一起做注意力。</p>
+  <p>所以生成专家能直接读到理解专家每一层的中间结果，反过来也一样，中间没有额外的瓶颈层。生成这套权重初始化时就是理解那套的拷贝。</p>
+  <figure><div class="fig" id="fig2"></div>
+  <figcaption>一个 MoT 层。左列只处理文本和 ViT token，右列只处理 VAE token。</figcaption></figure>
+</section>
+
+<section>
+  <h2>3. 谁能看见谁：注意力掩码</h2>
+  <p>三条规则叠在一起：</p>
+  <ul>
+    <li>默认是因果的：每个 token 只能看它前面的。</li>
+    <li>同一张图内部是全连接的：图里的 token 互相都能看见，不分先后。</li>
+    <li>正在去噪的那张图是“隐身”的：只有它自己的 token 能看见它，后面的任何 token 都看不见。</li>
+  </ul>
+  <p>第三条的后果是：一张图生成完之后，要把它的干净 VAE token 和 ViT token 再接到序列后面，后续内容才能引用它。</p>
+  <figure><div class="fig" id="fig3"></div>
+  <figcaption>行是“谁在看”，列是“被看的”。例子里的序列顺序是：文本、一张供理解的图、它的干净 latent、又一段文本、一张正在生成的图、之后的内容。</figcaption></figure>
+</section>
+
+<section>
+  <h2>4. 和 MAGI-2 Preview 的分权方式对比</h2>
+  <div class="tbl"><table>
+    <thead><tr><th></th><th>BAGEL</th><th>MAGI-2 Preview</th></tr></thead>
+    <tbody>
+      <tr><td>按什么分权重</td><td>按任务：理解 / 生成，共 2 套</td><td>按模态：视频 / 音频 / 文本，共 3 套</td></tr>
+      <tr><td>哪些层分</td><td>全部 28 层，外加末端的 Norm</td><td>只有两端 4 层（0、1、38、39）；中间 36 层的注意力是共用的</td></tr>
+      <tr><td>分的范围</td><td>Norm、QKV、QK-Norm、输出投影、MLP</td><td>两端 4 层同样是全部权重；中间层只有 MoE 前的 Norm 和一个模态专家按模态分</td></tr>
+      <tr><td>注意力</td><td>整条序列联合，带因果和图内全连接的掩码</td><td>整条序列联合，全双向</td></tr>
+      <tr><td>文本从哪来</td><td>模型自己的词嵌入，文本也是输出</td><td>外部文本编码器的特征，文本只是条件</td></tr>
+      <tr><td>残差</td><td>普通残差</td><td>mHC，4 条流</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<p class="src">依据：官方代码 github.com/ByteDance-Seed/Bagel（commit a2fa77d）里的 <code>modeling/bagel/bagel.py</code>、<code>qwen2_navit.py</code>、<code>data/data_utils.py</code>、<code>app.py</code>。层数、宽度、头数这些数字不在仓库里（配置随权重下发），图里写的 28 层、3584 维、28 头、4 组 KV、MLP 中间维 18944，以及 ViT 的 1152 维，是按 Qwen2.5-7B 和 SigLIP so400m 的公开配置填的，没有对着 BAGEL 的权重核对。</p>
+</main>
+
+<script>
+(function(){
+"use strict";
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const tw=(s,fs)=>{let w=0;for(const ch of String(s)){const k=ch.codePointAt(0);w+=k>=0x2E80?fs:k>=0x2000&&k<0x2C00?fs*0.9:fs*0.58;}return w;};
+const Scene=()=>({rects:[],edges:[],circles:[],labels:[]});
+function rect(sc,x,y,w,h,kind,lines,extra){const r=Object.assign({x,y,w,h,kind,lines:lines||[]},extra||{});sc.rects.push(r);return r;}
+const top=r=>[r.x+r.w/2,r.y], bot=r=>[r.x+r.w/2,r.y+r.h];
+const edge=(sc,pts,o)=>sc.edges.push(Object.assign({pts},o||{}));
+const plus=(sc,x,y)=>sc.circles.push({x,y,r:9});
+const lh=n=>n<=1?30:14+n*15;
+const KIND={
+  io:{fill:"#F2F3F6",stroke:"#6B7280",name:"输入 / 输出"},
+  und:{fill:"#DCE8FB",stroke:"#2F5FB3",name:"理解专家"},
+  gen:{fill:"#FCE9C8",stroke:"#B7791F",name:"生成专家"},
+  shared:{fill:"#D9F2E3",stroke:"#2E7D4F",name:"两边共用"},
+  group:{fill:"#FAFAFB",stroke:"#9CA3AF",dash:"5 4"},
+  yes:{fill:"#D9F2E3",stroke:"#2E7D4F"},no:{fill:"#FFFFFF",stroke:"#C9CDD5"},self:{fill:"#E6ECF9",stroke:"#2F5FB3"},
+  head:{fill:"#FFFFFF",stroke:"#FFFFFF"}
+};
+const INK="#1F2430", SUB="#565E6C", EDGE="#3A4150";
+const FONT="'Helvetica Neue',Helvetica,Arial,'PingFang SC','Microsoft YaHei','Noto Sans SC',sans-serif";
+function textEl(x,y,s,size,weight,fill,maxW,anchor){
+  const fit=maxW&&tw(s,size)>maxW?' textLength="'+maxW.toFixed(1)+'" lengthAdjust="spacingAndGlyphs"':"";
+  return '<text x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" font-size="'+size+'" font-weight="'+weight+'" fill="'+fill+'" text-anchor="'+(anchor||"middle")+'"'+fit+'>'+esc(s)+'</text>';
+}
+function draw(id,sc,label,legend){
+  let x1=0,y1=0;sc.rects.forEach(r=>{x1=Math.max(x1,r.x+r.w);y1=Math.max(y1,r.y+r.h);});
+  sc.circles.forEach(q=>{y1=Math.max(y1,q.y+q.r);});
+  const M=10, W=x1+2*M, H=y1+2*M+(legend?34:0), o=[], mk="ah-"+id;
+  o.push('<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'" viewBox="'+(-M)+' '+(-M)+' '+W+' '+H+'" font-family="'+FONT+'" role="img" aria-label="'+esc(label)+'">');
+  o.push('<defs><marker id="'+mk+'" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0.8 L7.5,4 L0,7.2 z" fill="'+EDGE+'"/></marker></defs>');
+  const dr=r=>{
+    const k=KIND[r.kind]||KIND.io, g=r.kind==="group";
+    o.push('<rect x="'+r.x+'" y="'+r.y+'" width="'+r.w+'" height="'+r.h+'" rx="'+(r.cell?3:g?10:6)+'" fill="'+k.fill+'" stroke="'+k.stroke+'" stroke-width="1.3"'+(k.dash?' stroke-dasharray="'+k.dash+'"':"")+'/>');
+    if(r.title)o.push(textEl(r.x+10,r.y+18,r.title,11.5,700,SUB,r.w-20,"start"));
+    const n=r.lines.length;if(!n)return;const cx=r.x+r.w/2, cy=r.y+r.h/2, mw=r.w-12;
+    if(r.cell){o.push(textEl(cx,cy+4,r.lines[0],11,r.bold?700:500,r.kind==="no"?"#9AA0AB":INK,mw));return;}
+    let ty=cy-(n*15)/2+11.5;
+    r.lines.forEach((s,i)=>{o.push(i===0?textEl(cx,ty,s,12,700,INK,mw):textEl(cx,ty,s,10.5,400,SUB,mw));ty+=15;});
+  };
+  sc.rects.filter(r=>r.kind==="group").forEach(dr);
+  sc.edges.forEach(e=>o.push('<polyline points="'+e.pts.map(p=>p[0]+","+p[1]).join(" ")+'" fill="none" stroke="'+EDGE+'" stroke-width="1.3"'+(e.noArrow?"":' marker-end="url(#'+mk+')"')+'/>'));
+  sc.rects.filter(r=>r.kind!=="group").forEach(dr);
+  sc.circles.forEach(q=>{o.push('<circle cx="'+q.x+'" cy="'+q.y+'" r="9" fill="#fff" stroke="'+EDGE+'" stroke-width="1.3"/>');
+    o.push('<path d="M'+(q.x-5)+','+q.y+' h10 M'+q.x+','+(q.y-5)+' v10" stroke="'+EDGE+'" stroke-width="1.3" fill="none"/>');});
+  sc.labels.forEach(l=>o.push(textEl(l.x,l.y,l.text,l.size||11,l.weight||400,l.color||SUB,0,l.anchor)));
+  if(legend){let lx=0;const ly=y1+26;legend.forEach(k=>{
+    o.push('<rect x="'+lx+'" y="'+(ly-10)+'" width="14" height="12" rx="3" fill="'+KIND[k].fill+'" stroke="'+KIND[k].stroke+'" stroke-width="1.2"/>');
+    o.push(textEl(lx+20,ly,KIND[k].name,11,400,SUB,0,"start"));lx+=20+tw(KIND[k].name,11)+22;});}
+  o.push('</svg>');document.getElementById(id).innerHTML=o.join("");
+}
+
+/* ---------- 图 1：整体 ---------- */
+(function(){
+  const sc=Scene(), CW=290, G=30, X=[0,CW+G,2*(CW+G)], W=3*CW+2*G, GAP=22;
+  const col=(x,items)=>{let y=0,p=null;items.forEach(it=>{const h=lh(it[1].length), r=rect(sc,x,y,CW,h,it[0],it[1]);if(p)edge(sc,[bot(p),top(r)]);p=r;y+=h+GAP;});return p;};
+  const a=col(X[0],[["io",["文本"]],["und",["分词 + 词嵌入","Qwen2.5 词表 → 3584 维"]]]);
+  const b=col(X[1],[["io",["图像（给模型看）"]],["und",["SigLIP2 ViT","so400m/14 · 原生宽高比 · 去掉最后一层"]],["und",["2 层 MLP 连接器 ＋ 2D 位置嵌入","1152 → 3584 维"]]]);
+  const c=col(X[2],[["io",["图像（要生成或修改的）"]],["gen",["FLUX VAE 编码","8 倍下采样 · 16 通道"]],["gen",["2×2 切块 → Linear（64 → 3584）","＋ 时间步嵌入 ＋ 2D 位置嵌入 · 训练时先加噪"]]]);
+  let y=Math.max(a.y+a.h,b.y+b.h,c.y+c.h)+34;
+  const seq=rect(sc,0,y,W,lh(3),"shared",["拼成一条交错序列","文本 …〈图像开始〉ViT token〈图像结束〉…〈图像开始〉VAE token〈图像结束〉…","同一张图的所有 token 共用一个 RoPE 位置号，图内位置靠 2D 位置嵌入区分"]);
+  [a,b,c].forEach(r=>edge(sc,[bot(r),[r.x+r.w/2,seq.y]]));
+  y+=seq.h+GAP+4;
+  const g=rect(sc,0,y,W,0,"group",[],{title:"MoT 层 × 28（用 Qwen2.5-7B 初始化，生成那套权重是理解那套的拷贝）"});
+  const hw=(W-28-G)/2, lx=14, rx=14+hw+G;let iy=y+34;
+  const u1=rect(sc,lx,iy,hw,lh(2),"und",["理解专家：Norm ＋ Q/K/V 投影","只处理文本 token 和 ViT token"]);
+  const g1=rect(sc,rx,iy,hw,lh(2),"gen",["生成专家：Norm ＋ Q/K/V 投影","只处理 VAE token"]);iy+=lh(2)+20;
+  const at=rect(sc,lx,iy,W-28,lh(2),"shared",["同一次自注意力","两类 token 在整条序列里互相可见（受掩码约束）"]);iy+=lh(2)+20;
+  const u2=rect(sc,lx,iy,hw,lh(2),"und",["理解专家：输出投影 ＋ MLP","各自加回残差"]);
+  const g2=rect(sc,rx,iy,hw,lh(2),"gen",["生成专家：输出投影 ＋ MLP","各自加回残差"]);iy+=lh(2);
+  g.h=iy+14-y;
+  edge(sc,[[W/2,seq.y+seq.h],[W/2,g.y]]);
+  [[u1,u2],[g1,g2]].forEach(p=>{edge(sc,[bot(p[0]),[p[0].x+p[0].w/2,at.y]]);edge(sc,[[p[1].x+p[1].w/2,at.y+at.h],top(p[1])]);});
+  y=g.y+g.h+GAP+6;
+  const uo=rect(sc,lx,y,hw,lh(2),"und",["末端 RMSNorm（理解）→ LM Head","预测下一个文本 token · 交叉熵"]);
+  const go=rect(sc,rx,y,hw,lh(2),"gen",["末端 RMSNorm（生成）→ Linear（3584 → 64）","预测速度场 v = 噪声 − 干净 latent · MSE"]);
+  edge(sc,[bot(u2),top(uo)]);edge(sc,[bot(g2),top(go)]);
+  y+=lh(2)+GAP;
+  const ut=rect(sc,lx,y,hw,30,"io",["文本输出（回答，或生成前的思考）"]);edge(sc,[bot(uo),top(ut)]);
+  const fs=rect(sc,rx,y,hw,lh(2),"io",["Rectified Flow 采样","默认 50 步 · 时间步 shift 3 · CFG 文本 4.0，编辑时图像 2.0"]);edge(sc,[bot(go),top(fs)]);
+  y+=lh(2)+GAP;
+  const im=rect(sc,rx,y,hw,30,"io",["还原 2×2 切块 → FLUX VAE 解码 → 图像"]);edge(sc,[bot(fs),top(im)]);
+  draw("fig1",sc,"BAGEL 整体架构：文本、ViT token、VAE token 进同一条序列，经 28 个 MoT 层，分别输出文本和图像",["io","und","gen","shared"]);
+})();
+
+/* ---------- 图 2：一个 MoT 层 ---------- */
+(function(){
+  const sc=Scene(), CW=330, G=40, W=2*CW+G, lx=0, rx=CW+G, GAP=20;let y=0;
+  const wide=(lines,kind)=>{const r=rect(sc,0,y,W,lh(lines.length),kind,lines);y+=r.h+GAP;return r;};
+  const pair=(l,r)=>{const h=Math.max(lh(l.length),lh(r.length));const a=rect(sc,lx,y,CW,h,"und",l), b=rect(sc,rx,y,CW,h,"gen",r);y+=h+GAP;return [a,b];};
+  const link=(p,q)=>{if(Array.isArray(p)&&Array.isArray(q)){edge(sc,[bot(p[0]),top(q[0])]);edge(sc,[bot(p[1]),top(q[1])]);}
+    else if(Array.isArray(q))q.forEach(r=>edge(sc,[[r.x+r.w/2,p.y+p.h],top(r)]));
+    else p.forEach(r=>edge(sc,[bot(r),[r.x+r.w/2,q.y]]));};
+  const i=wide(["这一层的输入：整条序列","按 token 类型分流：文本、ViT → 左；VAE → 右"],"io");
+  const n1=pair(["RMSNorm（理解）"],["RMSNorm（生成）"]);link(i,n1);
+  const q=pair(["Q / K / V 投影（理解）","Q、K 再过各自的 QK-Norm"],["Q / K / V 投影（生成）","Q、K 再过各自的 QK-Norm"]);link(n1,q);
+  const at=wide(["自注意力：两边的 Q、K、V 按原位置拼回一条序列，一起算","28 头 · 4 组 KV（GQA）· RoPE · 掩码规则见第 3 节"],"shared");link(q,at);
+  const o=pair(["输出投影（理解）","＋ 加回残差"],["输出投影（生成）","＋ 加回残差"]);link(at,o);
+  const m=pair(["RMSNorm → MLP（理解）","3584 → 18944 → 3584 · ＋ 加回残差"],["RMSNorm → MLP（生成）","3584 → 18944 → 3584 · ＋ 加回残差"]);link(o,m);
+  const e=wide(["这一层的输出：两类 token 回到原位置，进入下一层"],"io");link(m,e);
+  draw("fig2",sc,"一个 MoT 层：理解和生成两套权重各自处理自己的 token，中间共用一次自注意力",["und","gen","shared"]);
+})();
+
+/* ---------- 图 3：注意力可见性 ---------- */
+(function(){
+  const sc=Scene(), seg=["文本 A","ViT 图 1","干净 latent 图 1","文本 B","加噪 latent 图 2","之后的内容"];
+  const type=["t","i","i","t","n","t"], LW=150, CW=118, CH=34;
+  sc.labels.push({x:LW+seg.length*CW/2,y:12,text:"被看的（key）",size:11.5,weight:700});
+  seg.forEach((s,j)=>rect(sc,LW+j*CW,22,CW-6,CH-6,"head",[s],{cell:true,bold:true}));
+  seg.forEach((s,i)=>{
+    const y=22+CH+i*CH;
+    rect(sc,0,y,LW-8,CH-6,"head",[s+" 在看"],{cell:true,bold:true});
+    seg.forEach((_,j)=>{
+      let kind,txt;
+      if(j===i){kind="self";txt=type[i]==="t"?"自己之前的":"整张图互相可见";}
+      else if(j<i){if(type[j]==="n"){kind="no";txt="看不见（隐身）";}else{kind="yes";txt="看得见";}}
+      else{kind="no";txt="看不见（在后面）";}
+      rect(sc,LW+j*CW,y,CW-6,CH-6,kind,[txt],{cell:true});
+    });
+  });
+  draw("fig3",sc,"注意力可见性矩阵：默认因果，图内全连接，正在去噪的图对后面的 token 不可见");
+})();
+})();
+</script>
+</body>
+</html>

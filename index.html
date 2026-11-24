@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MAGI-2 架构积木</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* 布局：左侧一列积木开关与参数，右侧是白纸画布；图本身固定为白底论文配色，所见即所导出 */
+:root{
+  --bg:#F3F4F7; --panel:#FFFFFF; --stage:#E6E8ED; --ink:#1C2330; --muted:#5E6675;
+  --line:#D8DBE2; --accent:#2B4EA2; --accent-soft:#E6ECF9; --note-bg:#FFF3D9; --note-ink:#7A4B00;
+  --sans:"IBM Plex Sans","PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#14171D; --panel:#1B1F27; --stage:#0E1014; --ink:#E6E9EF; --muted:#9AA3B2;
+    --line:#2D333E; --accent:#93ADF2; --accent-soft:#222B44; --note-bg:#3A2E12; --note-ink:#F1CB7A;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#14171D; --panel:#1B1F27; --stage:#0E1014; --ink:#E6E9EF; --muted:#9AA3B2;
+  --line:#2D333E; --accent:#93ADF2; --accent-soft:#222B44; --note-bg:#3A2E12; --note-ink:#F1CB7A;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans);display:grid;grid-template-columns:340px minmax(0,1fr)}
+aside{background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;padding:18px 16px 28px;display:flex;flex-direction:column;gap:18px}
+h1{font-size:17px;font-weight:600;margin:0;text-wrap:balance}
+.lede{margin:4px 0 0;color:var(--muted);font-size:12.5px}
+section{display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line);padding-top:14px}
+h2{font-size:12px;font-weight:600;letter-spacing:.06em;color:var(--muted);margin:0;text-transform:uppercase}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px}
+.f{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted);min-width:0}
+.f.wide{grid-column:1/-1}
+input[type=number],input[type=text],select{
+  font:13px var(--mono);color:var(--ink);background:var(--bg);border:1px solid var(--line);
+  border-radius:6px;padding:6px 8px;width:100%;min-width:0}
+input[type=text]{font-family:var(--sans)}
+select{font-family:var(--sans)}
+input:focus-visible,select:focus-visible,button:focus-visible,.seg label:focus-within,.blk > label:focus-within{outline:2px solid var(--accent);outline-offset:1px}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg label{flex:1;text-align:center;padding:6px 4px;font-size:12.5px;cursor:pointer;color:var(--muted);border-left:1px solid var(--line);position:relative}
+.seg label:first-child{border-left:0}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg label:has(input:checked){background:var(--accent-soft);color:var(--accent);font-weight:600}
+.chk{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer}
+.chk input{accent-color:var(--accent);width:15px;height:15px;margin:0}
+.blk{border:1px solid var(--line);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.blk:has(> label input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.blk > label{font-weight:600}
+.blk small{color:var(--muted);font-size:12px;font-weight:400;display:block}
+.sw{display:inline-block;width:10px;height:10px;border-radius:3px;border:1.5px solid;margin-right:2px;flex:none}
+.note{background:var(--note-bg);color:var(--note-ink);border-radius:8px;padding:8px 10px;font-size:12px}
+[hidden]{display:none!important}
+button{font:13px var(--sans);color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:6px 11px;cursor:pointer}
+button:hover{border-color:var(--accent);color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--panel);font-weight:600}
+button.primary:hover{color:var(--panel);filter:brightness(1.08)}
+button.ghost{border-style:dashed}
+.crow{display:grid;grid-template-columns:1fr 1fr auto;gap:6px;align-items:center}
+.crow input.nm{grid-column:1/3}
+.crow button{padding:4px 8px}
+main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.bar{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+.bar .sp{flex:1}
+.bar .grp{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.bar .lbl{font-size:12px;color:var(--muted)}
+#stats{padding:8px 16px;font-size:12.5px;color:var(--muted);border-bottom:1px solid var(--line);background:var(--panel);display:flex;flex-wrap:wrap;gap:4px 18px}
+#stats b{font:500 13px var(--mono);color:var(--ink);font-variant-numeric:tabular-nums}
+#stage{flex:1;overflow:auto;background:var(--stage);padding:20px}
+#paper{display:inline-block;background:#fff;border-radius:6px;box-shadow:0 1px 2px rgba(0,0,0,.12),0 8px 24px rgba(0,0,0,.10);line-height:0}
+#toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s}
+#toast.on{opacity:1}
+@media (prefers-reduced-motion: reduce){#toast{transition:none}}
+@media (max-width:820px){
+  html,body{height:auto}
+  body{display:block}
+  aside{border-right:0;border-bottom:1px solid var(--line);overflow:visible}
+  #stage{min-height:70vh}
+}
+</style>
+</head>
+<body>
+<aside>
+  <div>
+    <h1>MAGI-2 架构积木</h1>
+    <p class="lede">以 MAGI-2 Preview 为底座。勾选模块、改数字，右边的架构图跟着变。</p>
+  </div>
+
+  <section>
+    <h2>底座</h2>
+    <div class="seg" role="radiogroup" aria-label="底座形态">
+      <label><input type="radio" name="mode" value="dit" data-k="mode" id="f-mode-dit">原版音视频 DiT</label>
+      <label><input type="radio" name="mode" value="lm" data-k="mode" id="f-mode-lm">语言模型形态</label>
+    </div>
+    <div class="grid">
+      <label class="f">总层数<input type="number" id="f-L" data-k="L" min="3" max="200"></label>
+      <label class="f">两端 Dense 层（每端）<input type="number" id="f-dense" data-k="dense" min="0" max="50"></label>
+      <label class="f">隐藏维度 d<input type="number" id="f-d" data-k="d" min="64" step="64"></label>
+      <label class="f">注意力头数<input type="number" id="f-ah" data-k="ah" min="1" max="256"></label>
+    </div>
+    <label class="chk"><input type="checkbox" id="f-sink" data-k="sink">学习型 attention sink</label>
+    <label class="chk"><input type="checkbox" id="f-gate" data-k="gate">注意力输出 sigmoid 门</label>
+    <label class="chk" data-if="mode=dit"><input type="checkbox" id="f-mot" data-k="mot">两端 Dense 层每模态一套权重（MoT 式）</label>
+    <label class="chk" data-if="mode=dit"><input type="checkbox" id="f-refiner" data-k="refiner">1080p Refiner 阶段</label>
+  </section>
+
+  <section>
+    <h2>Multi-Head LatentMoE</h2>
+    <div class="grid">
+      <label class="f">Head 数 M<input type="number" id="f-M" data-k="M" min="1" max="64"></label>
+      <label class="f">每头维度 d_h<input type="number" id="f-dh" data-k="dh" min="8" step="8"></label>
+      <label class="f">每头专家数 E<input type="number" id="f-E" data-k="E" min="1" max="8192"></label>
+      <label class="f">每头 Top-k<input type="number" id="f-k" data-k="k" min="1" max="8192"></label>
+      <label class="f">专家中间维度<input type="number" id="f-eh" data-k="eh" min="8" step="8"></label>
+      <label class="f">全局共享专家<input type="number" id="f-shared" data-k="shared" min="0" max="8"></label>
+      <label class="f wide" data-if="mode=dit">模态专属共享专家（每个模态几个）<input type="number" id="f-mshared" data-k="mshared" min="0" max="8"></label>
+    </div>
+  </section>
+
+  <section>
+    <h2>残差结构</h2>
+    <div class="seg" role="radiogroup" aria-label="残差结构">
+      <label><input type="radio" name="res" value="std" data-k="res" id="f-res-std">标准残差</label>
+      <label><input type="radio" name="res" value="mhc" data-k="res" id="f-res-mhc">mHC</label>
+      <label><input type="radio" name="res" value="vwn" data-k="res" id="f-res-vwn">VWN</label>
+    </div>
+    <div class="grid" data-if="res=mhc">
+      <label class="f wide">残差流条数 n（原版为 4）<input type="number" id="f-streams" data-k="streams" min="2" max="8"></label>
+    </div>
+    <div class="grid" data-if="res=vwn">
+      <label class="f">骨干分段 m<input type="number" id="f-vm" data-k="vm" min="1" max="63"></label>
+      <label class="f">虚拟分段 n<input type="number" id="f-vn" data-k="vn" min="2" max="64"></label>
+      <small class="f wide">虚拟宽度 D′ = n/m × d。原论文 1.5× 用 m=2、n=3；2×、4×、8× 用 m=8，n=16、32、64。</small>
+    </div>
+  </section>
+
+  <section>
+    <h2>可选积木</h2>
+    <div class="blk">
+      <label class="chk"><input type="checkbox" id="f-engram" data-k="engram"><span class="sw" style="background:#EADCF8;border-color:#6B3FA0"></span>Engram 条件记忆</label>
+      <small>在指定层的 Attention 之前，把 N-gram 哈希查表的结果经上下文门控后加回残差流。原论文放在第 2、15 层。</small>
+      <div class="grid" data-if="engram">
+        <label class="f wide">注入层（逗号分隔）<input type="text" id="f-engLayers" data-k="engLayers" placeholder="2, 15"></label>
+        <label class="f">最大 N-gram<input type="number" id="f-engN" data-k="engN" min="2" max="5"></label>
+        <label class="f">哈希头数<input type="number" id="f-engK" data-k="engK" min="1" max="32"></label>
+      </div>
+    </div>
+    <div class="blk">
+      <label class="chk"><input type="checkbox" id="f-oe" data-k="oe"><span class="sw" style="background:#EADCF8;border-color:#6B3FA0"></span>Over-Encoding 输入嵌入</label>
+      <small>只改输入端：把 2…n-gram 的哈希嵌入加到 token 嵌入上。原论文 n=3。</small>
+      <div class="grid" data-if="oe">
+        <label class="f">最大 n-gram<input type="number" id="f-oeN" data-k="oeN" min="2" max="5"></label>
+        <label class="f">每阶子表数 k<input type="number" id="f-oeK" data-k="oeK" min="1" max="16"></label>
+      </div>
+    </div>
+    <div class="note" id="note-dit" hidden>Engram 和 Over-Encoding 都靠离散 token ID 查表。原版 DiT 形态下，图里把它们画成只吃文本 token ID；要画纯语言模型，请切到「语言模型形态」。</div>
+  </section>
+
+  <section>
+    <h2>自定义模块</h2>
+    <div id="customList" style="display:flex;flex-direction:column;gap:10px"></div>
+    <button class="ghost" id="addCustom" type="button">＋ 加一个自定义模块</button>
+  </section>
+
+  <section>
+    <button id="reset" type="button">恢复成原版 MAGI-2 Preview</button>
+  </section>
+</aside>
+
+<main>
+  <div class="bar">
+    <div class="grp"><span class="lbl">画哪几块</span>
+      <label class="chk"><input type="checkbox" id="f-showA" data-k="showA">整体</label>
+      <label class="chk"><input type="checkbox" id="f-showB" data-k="showB">单层 Block</label>
+      <label class="chk"><input type="checkbox" id="f-showC" data-k="showC">MoE 内部</label>
+      <label class="chk"><input type="checkbox" id="f-showD" data-k="showD">可选积木内部</label>
+    </div>
+    <div class="grp"><span class="lbl">方向</span>
+      <div class="seg">
+        <label><input type="radio" name="dir" value="up" data-k="dir" id="f-dir-up">输入在下</label>
+        <label><input type="radio" name="dir" value="down" data-k="dir" id="f-dir-down">输入在上</label>
+      </div>
+    </div>
+    <div class="grp"><span class="lbl">缩放</span>
+      <button id="zout" type="button" aria-label="缩小">−</button>
+      <button id="zfit" type="button">适应宽度</button>
+      <button id="zin" type="button" aria-label="放大">＋</button>
+    </div>
+    <span class="sp"></span>
+    <div class="grp">
+      <button id="copySvg" type="button">复制 SVG</button>
+      <button id="dlSvg" type="button">下载 SVG</button>
+      <button id="dlPng" type="button" class="primary">下载 PNG</button>
+    </div>
+  </div>
+  <div id="stats"></div>
+  <div id="stage"><div id="paper"></div></div>
+</main>
+<div id="toast" role="status"></div>
+
+<script>
+(function(){
+"use strict";
+const KEY="magi2-builder-v3";
+const DEF={mode:"dit",dir:"up",L:40,dense:2,d:3072,ah:24,sink:true,gate:true,refiner:false,mot:true,
+  M:12,dh:256,E:256,k:6,eh:1280,shared:1,mshared:1,
+  res:"mhc",streams:4,vm:2,vn:3,
+  engram:false,engLayers:"2, 15",engN:3,engK:8,
+  oe:false,oeN:3,oeK:4,
+  custom:[],showA:true,showB:true,showC:true,showD:true};
+const POS={input:"输入嵌入旁",pre:"层内 · Attention 前",mid:"层内 · Attention 与 MoE 之间",post:"层内 · MoE 后",out:"输出头前"};
+const clone=o=>JSON.parse(JSON.stringify(o));
+let st=load(), zoom=null;
+function load(){
+  try{const j=JSON.parse(localStorage.getItem(KEY));
+    if(j&&typeof j==="object") return Object.assign(clone(DEF),j,{custom:Array.isArray(j.custom)?j.custom:[]});}catch(e){}
+  return clone(DEF);
+}
+function persist(){try{localStorage.setItem(KEY,JSON.stringify(st));}catch(e){}}
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const int=(v,lo,hi,dflt)=>{v=Math.round(Number(v));if(!isFinite(v))v=dflt;return Math.min(hi,Math.max(lo,v));};
+function parseLayers(s,L){
+  const out=[];String(s||"").split(/[,，\s]+/).forEach(t=>{const n=parseInt(t,10);if(isFinite(n)&&n>=0&&n<L&&!out.includes(n))out.push(n);});
+  return out.sort((a,b)=>a-b);
+}
+function cfg(){
+  const c=clone(st);
+  c.L=int(c.L,3,200,40); c.dense=int(c.dense,0,Math.floor((c.L-1)/2),2);
+  c.d=int(c.d,64,65536,3072); c.ah=int(c.ah,1,256,24);
+  c.M=int(c.M,1,64,12); c.dh=int(c.dh,8,8192,256); c.E=int(c.E,1,8192,256); c.k=int(c.k,1,c.E,6);
+  c.eh=int(c.eh,8,65536,1280); c.shared=int(c.shared,0,8,1); c.mshared=c.mode==="dit"?int(c.mshared,0,8,1):0;
+  c.ffnI=Math.floor(c.d*4*2/3/128)*128||c.d*2;
+  c.streams=int(c.streams,2,8,4); c.vn=int(c.vn,2,64,3); c.vm=int(c.vm,1,c.vn-1,2);
+  c.engN=int(c.engN,2,5,3); c.engK=int(c.engK,1,32,8); c.oeN=int(c.oeN,2,5,3); c.oeK=int(c.oeK,1,16,4);
+  c.engL=parseLayers(c.engLayers,c.L);
+  c.up=c.dir==="up"; c.dit=c.mode==="dit"; c.mot=c.dit&&!!c.mot;
+  c.moeA=c.dense; c.moeB=c.L-c.dense-1;
+  c.custom=(c.custom||[]).filter(m=>m&&String(m.name||"").trim()).map(m=>{
+    const ls=parseLayers(m.layers,c.L);
+    return {name:String(m.name).trim().slice(0,40),pos:POS[m.pos]?m.pos:"post",layers:ls,lab:ls.length?"仅层 "+ls.join(", "):"所有层"};
+  });
+  return c;
+}
+const rng=(a,b)=>a===b?"层 "+a:"层 "+a+"–"+b;
+const tw=(s,fs)=>{let w=0;for(const ch of String(s)){const k=ch.codePointAt(0);w+=k>=0x2E80?fs:k>=0x2000&&k<0x2C00?fs*0.9:fs*0.58;}return w;};
+
+/* ---------- 场景图：先按“数据流向下”排版，需要时整体翻转 ---------- */
+const Scene=()=>({rects:[],edges:[],circles:[],labels:[]});
+function rect(sc,x,y,w,h,kind,lines,extra){const r=Object.assign({x,y,w,h,kind,lines:lines||[]},extra||{});sc.rects.push(r);return r;}
+const top=r=>[r.x+r.w/2,r.y], bot=r=>[r.x+r.w/2,r.y+r.h];
+const edge=(sc,pts,o)=>sc.edges.push(Object.assign({pts},o||{}));
+const plus=(sc,x,y)=>sc.circles.push({x,y,r:9,plus:true});
+const dot=(sc,x,y)=>sc.circles.push({x,y,r:2.6});
+const lh=n=>n<=1?30:14+n*15;
+
+function buildA(c){
+  const sc=Scene(), MX=230, MW=330, SW=176, cx=MX+MW/2, GAP=24;
+  const padT=c.up?14:28, padB=c.up?28:14;
+  const bus=c.res!=="std", mhc=c.res==="mhc", N=mhc?c.streams:c.vn, bx=MX+24, G=KIND.res.stroke;
+  const sdim=mhc?N*c.d:bus?Math.round(c.vn/c.vm*c.d):c.d;
+  const sdesc=mhc?N+" 条流 × "+c.d+" = "+sdim+" 维":bus?"D′ = "+sdim+" 维（"+N+" 段）":c.d+" 维";
+  let y=0, from=null, busTo=null;
+  const node=(lines,kind,o)=>{const h=lh(lines.length);const r=rect(sc,MX,y,MW,h,kind,lines,o);if(from)edge(sc,[from,top(r)]);
+    if(bus&&!from&&!busTo&&pre)busTo=r;from=bot(r);y+=h+GAP;return r;};
+  let pre=null;
+  if(c.dit){
+    const bw=(MW-20)/3, ins=[["视频 latent","Wan2.2 VAE","加噪 · 48 通道"],["音频 latent","Stable Audio","加噪 · 64 通道"],["文本特征","Qwen3.5-27B","末层 · 5120 维"]]
+      .map((l,i)=>rect(sc,MX+i*(bw+10),y,bw,lh(3),"io",l));
+    y+=lh(3)+GAP;
+    const pk=rect(sc,MX,y,MW,lh(3),"io",["打包为单一序列","视频 → 音频 → 文本（I2V 再接参考图 token）","无 cross-attention · 无 adaLN"]);
+    ins.forEach(r=>edge(sc,[bot(r),[r.x+r.w/2,pk.y]]));
+    from=bot(pk);y+=pk.h+GAP;
+    pre=node(["PreAdapter：每个模态一个 Linear","48 / 64 / 5120 → "+sdesc,"时间步：64 维正弦编码覆盖前 64 通道"],"io");
+  }else{
+    node(["Token IDs"],"io");
+    pre=node(["Token Embedding","词表 → "+sdesc],"io");
+  }
+  const embed=pre;
+  if(bus)from=null;
+
+  const attnSub=c.ah+" 头 × "+Math.round(c.d/c.ah)+" 维 · "+(c.dit?"全序列双向":"因果");
+  const engBoxes=[], W3=["视频权重","音频权重","文本权重"];
+  /* 一层里按数据流顺序排的子层：每个子层都挂在残差通路上 */
+  const subs=(a,b,isMoe)=>{
+    const hit=m=>!m.layers.length||m.layers.some(l=>l>=a&&l<=b);
+    const cu=pos=>c.custom.filter(m=>m.pos===pos&&hit(m)).map(m=>({lines:[m.name,m.lab],kind:"custom"}));
+    const el=c.engram?c.engL.filter(l=>l>=a&&l<=b):[];
+    const mot=c.mot&&!isMoe;
+    let s=cu("pre");
+    if(el.length)s.push({lines:["Engram 门控注入","仅层 "+el.join(", ")],kind:"mem",eng:true,moe:isMoe});
+    s.push(mot?{lines:[],cap:"Self-Attention · 全序列联合",tri:W3,kind:"attn",mix:true,h:72}
+              :{lines:["Self-Attention",attnSub].concat(c.dit?["所有模态共用一套权重"]:[]),kind:"attn",mix:true});
+    s=s.concat(cu("mid"));
+    const nsh=c.shared+c.mshared;
+    s.push(isMoe?{lines:["Multi-Head LatentMoE",c.M+" 头 × "+c.E+" 专家 · 每头 Top-"+c.k].concat(nsh?["并联："+(c.shared?"共享专家":"")+(c.shared&&c.mshared?" ＋ ":"")+(c.mshared?"模态专家":"")]:[]),kind:"moe",mix:true}
+                :mot?{lines:[],cap:"Dense FFN "+c.d+"→"+c.ffnI+"→"+c.d,tri:W3,kind:"dense",mix:true,h:72}
+                :{lines:["Dense FFN",c.d+" → "+c.ffnI+" → "+c.d+" · SwiGLU"],kind:"dense",mix:true});
+    return s.concat(cu("post"));
+  };
+  const group=(title,items)=>{
+    const g=rect(sc,MX,y,MW,0,"group",[],{title,tdx:bus?44:10});let iy=y+padT;
+    items.forEach(it=>{
+      let r;
+      if(bus){
+        const h=it.h||Math.max(lh(it.lines.length),58);r=rect(sc,MX+62,iy,MW-76,h,it.kind,it.lines);
+        const ry=iy+10, wy=iy+h-10;
+        dot(sc,bx,ry);edge(sc,[[bx,ry],[r.x,ry]]);
+        edge(sc,[[r.x,wy],[bx+7,wy]]);sc.circles.push({x:bx,y:wy,r:7,plus:true});
+        if(it.mix)rect(sc,bx-16,iy+h/2-8,32,16,"res",[mhc?"H_res":"Â"],{tiny:true});
+        iy+=h+12;
+      }else{
+        const h=it.h||lh(it.lines.length), yb=iy+4;dot(sc,cx,yb);
+        r=rect(sc,MX+48,yb+14,MW-96,h,it.kind,it.lines);edge(sc,[from,top(r)]);
+        const py=r.y+h+18;plus(sc,cx,py);edge(sc,[bot(r),[cx,py-9]]);
+        edge(sc,[[cx,yb],[MX+22,yb],[MX+22,py],[cx-9,py]]);from=[cx,py+9];iy=py+9+8;
+      }
+      if(it.tri){
+        /* 这几层所有权重按模态各有一套，但注意力仍在整条序列上一起算 */
+        sc.labels.push({x:r.x+r.w/2,y:r.y+19,text:it.cap,size:12,color:INK});
+        const mw=(r.w-16-12)/3;
+        it.tri.forEach((t,i)=>rect(sc,r.x+8+i*(mw+6),r.y+r.h-32,mw,22,"norm",[t],{tiny:true}));
+      }
+      if(it.eng){r.inMoe=it.moe;engBoxes.push(r);}
+    });
+    g.h=iy-(bus?12:8)+padB-y;y+=g.h+GAP;return g;
+  };
+  const dt=c.mot?" · 每模态一套权重":"";
+  if(c.dense>0)group("Dense 层 × "+c.dense+" · "+rng(0,c.dense-1)+dt,subs(0,c.dense-1,false));
+  const moe=group("Multi-Head MoE 层 × "+(c.moeB-c.moeA+1)+" · "+rng(c.moeA,c.moeB),subs(c.moeA,c.moeB,true));
+  if(c.dense>0)group("Dense 层 × "+c.dense+" · "+rng(c.L-c.dense,c.L-1)+dt,subs(c.L-c.dense,c.L-1,false));
+
+  c.custom.filter(m=>m.pos==="out").forEach(m=>node([m.name],"custom"));
+  if(c.dit){
+    node(["PostAdapter：视频、音频各一套","RMSNorm("+sdim+") → Linear → 48 / 64 通道","输出速度场 v · 文本 token 不出结果"],"io");
+    const smp=node(["采样循环（模型外）","Flow UniPC · 100 步 · shift 7","CFG：视频 5.0 / 音频 7.0 · 每步条件、无条件各算一次"],"io");
+    /* 音频只在预览阶段生成；Refiner 只接视频 latent */
+    const hw=(MW-12)/2, lx=MX, rx=MX+hw+12, hb=smp.y+smp.h;let y2=y, vfrom=[lx+hw/2,hb];
+    if(c.refiner){const rf=rect(sc,lx,y,hw,lh(4),"dense",["Refiner（另一套权重）","latent 上采样 + 重新加噪","30 层 · 宽 4096 · 5 步","普通残差 · 局部窗口注意力"]);
+      edge(sc,[vfrom,top(rf)]);vfrom=bot(rf);y2=y+rf.h+GAP;}
+    const vd=rect(sc,lx,y2,hw,46,"io",["TurboVAE 解码",c.refiner?"视频 1088×1920 · 25 fps":"视频 512×896 · 12.5 fps"]);
+    const ad=rect(sc,rx,y2,hw,46,"io",["Stable Audio VAE 解码","音频 44.1 kHz"]);
+    edge(sc,[vfrom,top(vd)]);edge(sc,[[rx+hw/2,hb],top(ad)]);
+  }else{
+    node(["RMSNorm → LM Head",sdim+" 维 → 词表 logits"],"io");
+    node(["下一 token 分布"],"io");
+  }
+  if(bus&&busTo){
+    edge(sc,[[bx,pre.y+pre.h],[bx,busTo.y]],{color:G,w:4,marker:"g"});
+    sc.labels.push({x:bx+10,y:pre.y+pre.h+GAP/2,text:"× "+N+(mhc?" 流":" 段"),size:10.5,anchor:"start",color:G});
+  }
+
+  /* 左侧：输入端挂件贴着嵌入节点；右侧：Engram 的查表模块指向层内的注入点 */
+  const side=[];
+  if(c.oe)side.push({kind:"mem",lines:["Over-Encoding","2…"+c.oeN+"-gram 哈希嵌入加到输入","每阶 "+c.oeK+" 张子表 · ID 对表长取模"].concat(c.dit?["键：文本 token IDs"]:[])});
+  c.custom.filter(m=>m.pos==="input").forEach(m=>side.push({kind:"custom",lines:[m.name]}));
+  const emid=embed.y+embed.h/2;let sy=null;
+  side.forEach((s,i)=>{const h=lh(s.lines.length);
+    sy=i===0?emid-h/2:sy-h-12;rect(sc,0,sy,SW,h,s.kind,s.lines);const my=sy+h/2;
+    if(i===0)edge(sc,[[SW,my],[MX,my]],{label:"⊕"});
+    else edge(sc,[[SW,my],[SW+22,my],[SW+22,emid]],{noArrow:true});});
+  if(engBoxes.length){
+    const e=engBoxes.find(r=>r.inMoe)||engBoxes[0];
+    const lines=["Engram 查表","2…"+c.engN+"-gram × "+c.engK+" 个哈希头",c.dit?"键：文本 token IDs":"键：压缩后的 token ID 后缀"];
+    const h=lh(lines.length), my=e.y+e.h/2, r=rect(sc,MX+MW+30,my-h/2,SW,h,"mem",lines);
+    edge(sc,[[r.x,my],[e.x+e.w,my]]);
+  }
+  return {sc,moe};
+}
+
+function buildB(c){
+  /* 画法跟 mHC / Hyper-Connections 论文图 1 一致：一条主干 + 一条旁路，旁路和子层两端各有一个映射。
+     粗绿线 = 宽的残差状态（n 条流或 over-width），细线 = 子层实际计算用的那一路（宽度 d） */
+  const sc=Scene(), CW=226, bus=c.res!=="std", mhc=c.res==="mhc", N=mhc?c.streams:c.vn, G=KIND.res.stroke;
+  const x0=bus?190:150, cx=x0+CW/2, mixW=150, skipX=bus?x0-26-mixW/2:x0-30;
+  const wide=bus?{color:G,w:3.6,marker:"g"}:null, wideNA=bus?{color:G,w:3.6,noArrow:true}:{noArrow:true};
+  const wlab=mhc?N+" × "+c.d:"D′ = "+Math.round(c.vn/c.vm*c.d);
+  const stream=!bus?"x · "+c.d+" 维":mhc?N+" 条残差流 · 每条 "+c.d+" 维":"over-width 隐状态 · "+N+" 段 × "+Math.round(c.d/c.vm)+" 维";
+  const inR=rect(sc,x0,0,CW,lh(2),"io",["第 ℓ 层输入",stream]);
+  let from=[cx,inR.h], moeR=null, first=true;
+  const pre=mhc?{lines:["Pre Mapping · H_pre",N+" 条流加权求和 → 1 路，权重 σ(·)"],kind:"res"}
+               :{lines:["GHC 读入 · Å","over-width 的 "+N+" 段 → 骨干的 "+c.vm+" 段"],kind:"res"};
+  const post=mhc?{lines:["Post Mapping · H_post","1 路 → 分发回 "+N+" 条流，权重 2σ(·)"],kind:"res"}
+                :{lines:["GHC 写回 · B","骨干的 "+c.vm+" 段 → over-width 的 "+N+" 段"],kind:"res"};
+  const mixL=mhc?["Res Mapping · H_res",N+"×"+N+" 双随机矩阵","Sinkhorn-Knopp × 20"]:["GHC 跨层传递 · Â",N+"×"+N+" 段间混合","宽状态不经过子层"];
+  /* mode: main = 注意力/MoE；side = 自定义子层；direct = 直接读写宽状态（Engram 在多流下逐流门控、逐流加回） */
+  function unit(core,mode,normLabel){
+    const main=mode==="main", wrap=bus&&mode!=="direct", boxes=[];
+    if(wrap)boxes.push(Object.assign({},pre,{role:"pre"}));
+    if(main)boxes.push({lines:[normLabel||"RMSNorm"],kind:"norm",small:true,h:22});
+    core.role="core";boxes.push(core);
+    if(wrap)boxes.push(Object.assign({},post,{role:"post"}));
+    const R={},yb=from[1]+20;let yy=yb+20,p=null,pb=null;
+    boxes.forEach(b=>{const h=b.h||lh(b.lines.length);const r=rect(sc,x0,yy,CW,h,b.kind,b.lines,{small:b.small});
+      if(!p){edge(sc,[from,[cx,yb]],wideNA);edge(sc,[[cx,yb],top(r)],wide);}
+      else edge(sc,[bot(p),top(r)],pb.role==="pre"&&first?{label:c.d+" 维"}:null);
+      p=r;pb=b;R[b.role]=r;yy+=h+16;});
+    const py=yy+8;edge(sc,[bot(p),[cx,py-9]],wide);
+    if(bus&&main){const mh=lh(3),my=(yb+py)/2-mh/2;
+      edge(sc,[[cx,yb],[skipX,yb],[skipX,my]],wide);rect(sc,skipX-mixW/2,my,mixW,mh,"res",mixL);
+      edge(sc,[[skipX,my+mh],[skipX,py],[cx-9,py]],wide);}
+    else edge(sc,[[cx,yb],[skipX,yb],[skipX,py],[cx-9,py]],Object.assign({label:bus?"直通":"恒等"},wide||{}));
+    dot(sc,cx,yb);plus(sc,cx,py);
+    if(first&&bus)sc.labels.push({x:cx+8,y:yb-9,text:wlab,size:10,anchor:"start",color:G});
+    if(wrap)first=false;
+    from=[cx,py+9];return R.core;
+  }
+  const cust=pos=>c.custom.filter(m=>m.pos===pos).forEach(m=>unit({lines:[m.name,m.lab],kind:"custom"},"side"));
+
+  cust("pre");
+  if(c.engram&&c.engL.length){
+    const l3=mhc?"每条流各算一个门、各自加回":"以隐状态为 query 做门控 → 卷积";
+    const e=unit({lines:["Engram","N-gram 哈希查表（每阶 "+c.engK+" 头）",l3,"仅在层 "+c.engL.join(", ")],kind:"mem"},"direct");
+    const t=rect(sc,x0+CW+28,e.y+e.h/2-14,82,28,"io",["token IDs"],{small:true});
+    edge(sc,[[t.x,t.y+14],[x0+CW,e.y+e.h/2]]);
+  }
+  const aL=["Self-Attention","QKV → QK-Norm → "+(c.dit?"3D RoPE（t, h, w）":"RoPE"),
+    c.ah+" 头 × "+Math.round(c.d/c.ah)+" 维 · "+(c.dit?"全序列双向":"因果")]
+    .concat(c.sink?["每头 1 个可学习 sink"]:[],[c.gate?"每头 sigmoid 门 → 输出投影":"输出投影"]);
+  unit({lines:aL,kind:"attn"},"main");
+  cust("mid");
+  const mL=["Multi-Head LatentMoE",c.M+" 头 × "+c.E+" 专家 · 每头 Top-"+c.k];
+  const nsh=c.shared+c.mshared;if(nsh)mL.push("并联相加："+(c.shared?"共享专家":"")+(c.shared&&c.mshared?" ＋ ":"")+(c.mshared?"模态专家":""));
+  moeR=unit({lines:mL,kind:"moe"},"main",c.dit?"RMSNorm（每模态一套）":"RMSNorm");
+  cust("post");
+  const out=rect(sc,x0,from[1]+22,CW,lh(2),"io",["第 ℓ+1 层输入",stream]);
+  edge(sc,[from,top(out)],wide);
+  return {sc,moe:moeR};
+}
+
+/* Engram 内部，按原论文的数据流 */
+function buildD(c){
+  const sc=Scene(), X=150, W=270, mhc=c.res==="mhc", hw=(W-14)/2, H2=lh(2);
+  let y=0, prev=null;
+  const add=(lines,kind)=>{const h=lh(lines.length), r=rect(sc,X,y,W,h,kind,lines);if(prev)edge(sc,[bot(prev),top(r)]);prev=r;y+=h+20;return r;};
+  add(["token IDs"+(c.dit?"（文本 token）":"")],"io");
+  add(["分词器压缩","NFKC、大小写等归并成规范 ID"],"mem");
+  add(["取后缀 N-gram","n = 2 … "+c.engN],"mem");
+  add(["多头哈希查表","每阶 "+c.engK+" 个哈希头，各查各的表"],"mem");
+  const e=add(["拼接成记忆向量 e","共 "+(c.engN-1)*c.engK+" 个查到的嵌入"],"mem");
+  const k=rect(sc,X,y,hw,H2,"mem",["W_K → RMSNorm","键 k"]), v=rect(sc,X+hw+14,y,hw,H2,"mem",["W_V","值 v"]);
+  edge(sc,[[k.x+hw/2,e.y+e.h],top(k)]);edge(sc,[[v.x+hw/2,e.y+e.h],top(v)]);y+=H2+20;
+  const g=rect(sc,X,y,hw,H2,"mem",["门 α = σ(q·k/√d)","每个 token 一个标量"]);edge(sc,[bot(k),top(g)]);
+  rect(sc,0,y,126,H2,"io",["q = RMSNorm(h)",mhc?"每条残差流各算一次":"h 是当前隐状态"]);edge(sc,[[126,y+H2/2],[X,y+H2/2]]);y+=H2+20;
+  const m=rect(sc,X,y,W,30,"mem",["α × v"]);edge(sc,[bot(g),[g.x+hw/2,m.y]]);edge(sc,[bot(v),[v.x+hw/2,m.y]]);
+  y+=50;prev=m;
+  add(["RMSNorm → 因果深度卷积 → SiLU","核 4 · 膨胀 "+c.engN+" · 再加回卷积前的输入"],"mem");
+  add(["加回残差流：H ← H + Y","仅在层 "+c.engL.join(", ")+"，位于 Attention 之前"].concat(mhc?["查表和 W_V 各流共用，W_K 每条流一套"]:[]),"io");
+  return {sc};
+}
+/* Over-Encoding 内部：只改输入嵌入 */
+function buildE(c){
+  const sc=Scene(), W=330, lw=108, rx=lw+16, rw=W-rx, H2=lh(2), sub=Math.max(1,Math.round(c.d/(c.oeN*c.oeK)));
+  const t=rect(sc,0,0,W,H2,"io",["token IDs"+(c.dit?"（文本 token）":""),"当前 token 和它前面的几个"]);
+  let y=t.h+22;
+  const a=rect(sc,rx,y,rw,H2,"mem",["n-gram ID（n = 2…"+c.oeN+"）","按进制 V 拼成整数，再对表长取模"]);y+=H2+18;
+  const b=rect(sc,rx,y,rw,H2,"mem",["每阶 "+c.oeK+" 张子表","每张约 "+sub+" 维，表长互不相同"]);y+=H2+18;
+  const p=rect(sc,rx,y,rw,H2,"mem",["各接一个线性投影","投到模型宽度后相加"]);
+  edge(sc,[[rx+rw/2,t.h],top(a)]);edge(sc,[bot(a),top(b)]);edge(sc,[bot(b),top(p)]);
+  const one=rect(sc,0,a.y,lw,p.y+p.h-a.y,"mem",c.dit?["原有文本嵌入","PreAdapter 的","文本 Linear"]:["1-gram 表","普通词嵌入","V × d"]);
+  edge(sc,[[lw/2,t.h],top(one)]);
+  const py=p.y+p.h+28;plus(sc,W/2,py);
+  edge(sc,[bot(one),[lw/2,py],[W/2-9,py]]);edge(sc,[bot(p),[rx+rw/2,py],[W/2+9,py]]);
+  const out=rect(sc,W/2-95,py+9+20,190,H2,"io",["输入嵌入","1-gram ＋ 2…"+c.oeN+"-gram 之和"]);
+  edge(sc,[[W/2,py+9],top(out)]);
+  return {sc};
+}
+
+function picks(seed,S,n){
+  const idx=Array.from({length:S},(_,i)=>i);let s=(seed*7919+104729)%233280;
+  for(let i=S-1;i>0;i--){s=(s*9301+49297)%233280;const j=Math.floor(s/233280*(i+1));const t=idx[i];idx[i]=idx[j];idx[j]=t;}
+  return new Set(idx.slice(0,n));
+}
+function buildC(c){
+  const sc=Scene(), colW=158, gap=14, ellW=30;
+  const padT=c.up?12:28, padB=c.up?28:12;
+  const cols=c.M<=4?Array.from({length:c.M},(_,i)=>i+1):[1,2,null,c.M];
+  const xs=[];let x=0;cols.forEach(h=>{xs.push(x);x+=(h===null?ellW:colW)+gap;});
+  const totalW=Math.max(x-gap,230), Cx=totalW/2, off=(totalW-(x-gap))/2;
+  const inR=rect(sc,Cx-72,0,144,lh(2),"io",["MoE 输入 x",c.d+" 维"]);
+  let y=inR.h+20;
+  const nr=rect(sc,Cx-100,y,200,24,"norm",[c.dit?"RMSNorm（每模态一套）":"RMSNorm"],{small:true});
+  edge(sc,[bot(inR),top(nr)]);y+=nr.h+22;
+  const routed=c.M*c.dh;
+  const win=rect(sc,0,y,totalW,lh(2),"moe",["split_linear，再按 head 切开",c.d+" → "+routed+" = "+c.M+" 头 × "+c.dh+" 维"]);
+  edge(sc,[bot(nr),top(win)]);y+=win.h+26;
+  const S=Math.min(c.E,8), on=c.E<=8?Math.min(c.k,c.E):Math.max(1,Math.min(3,c.k)), more=c.E>8;
+  const rowW=S*11+(S-1)*3+(more?16:0), RH=lh(3), hh=padT+RH+20+11+20+44+padB, sums=[];
+  cols.forEach((h,i)=>{
+    const gx=xs[i]+off;
+    if(h===null){sc.labels.push({x:gx+ellW/2,y:y+hh/2,text:"···",size:18});return;}
+    const ccx=gx+colW/2;
+    rect(sc,gx,y,colW,hh,"group",[],{title:"Head "+h+" · "+c.dh+" 维"});
+    const rt=rect(sc,gx+7,y+padT,colW-14,RH,"moe",["Router "+h+" · FP32","sigmoid · Top-"+c.k+" / "+c.E,"权重 L1 归一 × 4.9"]);
+    edge(sc,[[ccx,win.y+win.h],top(rt)]);
+    const sy=rt.y+rt.h+20, sx=ccx-rowW/2, pk=picks(h,S,on);
+    for(let j=0;j<S;j++)rect(sc,sx+j*14,sy,11,11,pk.has(j)?"eon":"eoff",[],{sq:true});
+    if(more)sc.labels.push({x:sx+S*14+6,y:sy+6,text:"…",size:12});
+    edge(sc,[bot(rt),[ccx,sy-3]]);
+    const sm=rect(sc,gx+7,sy+11+20,colW-14,44,"moe",["Σ pᵢ · Eᵢ(x)","激活 "+c.k+" / "+c.E+" 专家"]);
+    edge(sc,[[ccx,sy+14],top(sm)]);sums.push(sm);
+  });
+  const hy=y;y+=hh+26;
+  const wout=rect(sc,0,y,totalW,lh(2),"moe",["按 head 拼回 → merge_linear",routed+" → "+c.d]);
+  sums.forEach(s=>edge(sc,[bot(s),[s.x+s.w/2,wout.y]]));
+  let from=bot(wout);
+  const nsh=c.shared+c.mshared;
+  if(nsh){
+    const io=c.d+" → "+c.eh+" → "+c.d, lines=["共享专家（与路由专家并联）"];
+    if(c.shared)lines.push("全局 × "+c.shared+"：所有 token 都走");
+    if(c.mshared)lines.push("模态专属：每模态 "+c.mshared+" 个","token 只走自己模态的那个");
+    lines.push("各为 "+io,"不经路由，始终参与");
+    const sw=190, sh=lh(lines.length), sr=rect(sc,totalW+34,hy+(hh-sh)/2,sw,sh,"shared",lines), scx=sr.x+sw/2;
+    const py=wout.y+wout.h+26, ny=nr.y+nr.h/2;plus(sc,Cx,py);edge(sc,[bot(wout),[Cx,py-9]]);
+    edge(sc,[[nr.x+nr.w,ny],[scx,ny],[scx,sr.y]]);
+    edge(sc,[[scx,sr.y+sh],[scx,py],[Cx+9,py]]);from=[Cx,py+9];
+  }
+  const out=rect(sc,Cx-72,from[1]+22,144,lh(2),"io",["MoE 输出 y",c.d+" 维"]);
+  edge(sc,[from,top(out)]);
+  return {sc};
+}
+
+function bbox(sc){
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;const ex=(x,y)=>{x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y);};
+  sc.rects.forEach(r=>{ex(r.x,r.y);ex(r.x+r.w,r.y+r.h);});
+  sc.circles.forEach(o=>{ex(o.x-o.r,o.y-o.r);ex(o.x+o.r,o.y+o.r);});
+  sc.edges.forEach(e=>e.pts.forEach(p=>ex(p[0],p[1])));
+  sc.labels.forEach(l=>{ex(l.x-10,l.y-10);ex(l.x+10,l.y+10);});
+  return {x0,y0,x1,y1};
+}
+function shift(sc,dx,dy){
+  sc.rects.forEach(r=>{r.x+=dx;r.y+=dy;});sc.circles.forEach(o=>{o.x+=dx;o.y+=dy;});
+  sc.edges.forEach(e=>e.pts=e.pts.map(p=>[p[0]+dx,p[1]+dy]));sc.labels.forEach(l=>{l.x+=dx;l.y+=dy;});
+}
+
+const KIND={
+  io:{fill:"#F2F3F6",stroke:"#6B7280",name:"输入 / 输出"},
+  dense:{fill:"#E3E7EE",stroke:"#4B5563",name:"Dense 层"},
+  attn:{fill:"#DCE8FB",stroke:"#2F5FB3",name:"注意力"},
+  moe:{fill:"#FCE9C8",stroke:"#B7791F",name:"MoE 路由与专家"},
+  shared:{fill:"#FFF6DF",stroke:"#B7791F",name:"共享专家"},
+  res:{fill:"#D9F2E3",stroke:"#2E7D4F",name:"残差结构"},
+  mem:{fill:"#EADCF8",stroke:"#6B3FA0",name:"n-gram 查表记忆"},
+  custom:{fill:"#FBD9DF",stroke:"#B23A55",name:"自定义模块"},
+  norm:{fill:"#FFFFFF",stroke:"#6B7280"},
+  group:{fill:"#FAFAFB",stroke:"#9CA3AF",dash:"5 4"},
+  frame:{fill:"#FCFCFD",stroke:"#C9CDD5"},
+  eon:{fill:"#E9A23B",stroke:"#B7791F"},
+  eoff:{fill:"#FFFFFF",stroke:"#C9A56A"}
+};
+const INK="#1F2430", SUB="#565E6C", EDGE="#3A4150";
+const FONT="'Helvetica Neue',Helvetica,Arial,'PingFang SC','Microsoft YaHei','Noto Sans SC',sans-serif";
+
+function compose(c){
+  const panels=[];
+  if(c.showA){const a=buildA(c);panels.push(Object.assign(a,{id:"A",title:"整体架构",sub:(c.dit?"MAGI-2 Preview 预览阶段 Transformer":"MAGI-2 底座 · 语言模型形态")+" · "+c.L+" 层 · 宽度 "+c.d}));}
+  if(c.showB){const b=buildB(c);panels.push(Object.assign(b,{id:"B",title:"单层 Block 展开",sub:"MoE 层（"+rng(c.moeA,c.moeB)+"）· "+(c.res==="std"?"每个子层：x ← x + F(x)":c.res==="mhc"?"每个子层：x ← H_res·x + H_post·F(H_pre·x)；三个 H 都由 RMSNorm(全部流) → 线性层按 token 现算":"每个子层：H′ ← Â·H′ + B·F(Å·H′)；F 只在骨干宽度 D 上计算")}));}
+  if(c.showC){const m=buildC(c);panels.push(Object.assign(m,{id:"C",title:"Multi-Head LatentMoE 展开",sub:"每个路由专家："+c.dh+" → "+c.eh+" → "+c.dh+" · SwiGLU7"}));}
+  if(c.showD&&c.engram&&c.engL.length)panels.push(Object.assign(buildD(c),{id:"D",title:"Engram 展开",sub:"查表 → 上下文门控 → 卷积 → 加回残差流"}));
+  if(c.showD&&c.oe)panels.push(Object.assign(buildE(c),{id:"E",title:"Over-Encoding 展开",sub:"只改输入嵌入，输出词表不变"}));
+  const all=Scene();let ox=0;
+  panels.forEach(p=>{
+    const b=bbox(p.sc), framed=p.id!=="A"&&panels.length>1, pad=framed?18:0;
+    const need=Math.max(tw(p.sub,11.5),tw(p.title,14))+8, w=Math.max(b.x1-b.x0+2*pad,need);
+    shift(p.sc,ox-b.x0+pad+(w-(b.x1-b.x0+2*pad))/2,-b.y0+pad);
+    p.x=ox;p.w=w;p.h=b.y1-b.y0+2*pad;
+    if(framed){p.frame={x:ox,y:0,w:w,h:p.h,kind:"frame",lines:[]};all.rects.push(p.frame);}
+    ox+=w+70;
+  });
+  const by=id=>panels.find(p=>p.id===id);
+  const call=(r,f)=>{if(!r||!f)return;const o={noArrow:true,dashed:true,color:"#A3A9B4"};
+    edge(all,[[r.x+r.w,r.y],[f.x,f.y]],o);edge(all,[[r.x+r.w,r.y+r.h],[f.x,f.y+f.h]],o);};
+  const A=by("A"),B=by("B"),C=by("C");
+  if(A&&B)call(A.moe,B.frame);
+  if(B&&C)call(B.moe,C.frame);else if(A&&C&&!B)call(A.moe,C.frame);
+  panels.forEach(p=>{["rects","edges","circles","labels"].forEach(k=>all[k].push.apply(all[k],p.sc[k]));});
+  const H=Math.max.apply(null,panels.map(p=>p.h).concat([40]));
+  if(c.up){
+    all.rects.forEach(r=>{r.y=H-r.y-r.h;});all.circles.forEach(o=>{o.y=H-o.y;});
+    all.edges.forEach(e=>e.pts=e.pts.map(p=>[p[0],H-p[1]]));all.labels.forEach(l=>{l.y=H-l.y;});
+  }
+  const MG=24, HEAD=52;shift(all,MG,HEAD);
+  return {sc:all,W:Math.max(ox-70,200)+2*MG,H:H+HEAD+50,titles:panels.map(p=>({x:p.x+MG,title:p.title,sub:p.sub})),bodyH:H+HEAD};
+}
+
+function textEl(x,y,s,size,weight,fill,maxW,anchor){
+  const fit=maxW&&tw(s,size)>maxW?' textLength="'+maxW.toFixed(1)+'" lengthAdjust="spacingAndGlyphs"':"";
+  return '<text x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" font-size="'+size+'" font-weight="'+weight+'" fill="'+fill+'" text-anchor="'+(anchor||"middle")+'"'+fit+'>'+esc(s)+'</text>';
+}
+function buildSVG(c,scale){
+  const {sc,W,H,titles,bodyH}=compose(c);const o=[];
+  o.push('<svg xmlns="http://www.w3.org/2000/svg" width="'+Math.round(W*scale)+'" height="'+Math.round(H*scale)+'" viewBox="0 0 '+W+' '+H+'" font-family="'+FONT+'" role="img" aria-label="MAGI-2 架构图">');
+  o.push('<defs><marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0.8 L7.5,4 L0,7.2 z" fill="'+EDGE+'"/></marker><marker id="ahg" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0.8 L7.5,4 L0,7.2 z" fill="'+KIND.res.stroke+'"/></marker></defs>');
+  o.push('<rect width="'+W+'" height="'+H+'" fill="#FFFFFF"/>');
+  titles.forEach(t=>{o.push(textEl(t.x,20,t.title,14,700,INK,0,"start"));o.push(textEl(t.x,37,t.sub,11.5,400,SUB,0,"start"));});
+  const back=r=>r.kind==="frame"||r.kind==="group";
+  const drawRect=r=>{
+    const k=KIND[r.kind]||KIND.io, rx=r.sq?2:r.pill?r.h/2:back(r)?10:6;
+    o.push('<rect x="'+r.x.toFixed(1)+'" y="'+r.y.toFixed(1)+'" width="'+r.w.toFixed(1)+'" height="'+r.h.toFixed(1)+'" rx="'+rx+'" fill="'+k.fill+'" stroke="'+k.stroke+'" stroke-width="'+(r.sq?1:1.3)+'"'+(k.dash?' stroke-dasharray="'+k.dash+'"':"")+'/>');
+    const n=r.lines.length;if(!n)return;
+    const cx=r.x+r.w/2, cy=r.y+r.h/2, mw=r.w-12;
+    if(r.tiny){o.push(textEl(cx,cy+3.4,r.lines[0],9.5,500,INK));return;}
+    if(r.small){o.push(textEl(cx,cy+4,r.lines[0],11,500,INK,mw));return;}
+    let ty=cy-(n*15)/2+11.5;
+    r.lines.forEach((s,i)=>{o.push(i===0?textEl(cx,ty,s,12,700,INK,mw):textEl(cx,ty,s,10.5,400,SUB,mw));ty+=15;});
+  };
+  sc.rects.filter(r=>r.kind==="frame").forEach(drawRect);
+  sc.rects.filter(r=>r.kind==="group").forEach(drawRect);
+  sc.edges.forEach(e=>{
+    const col=e.color||EDGE;
+    o.push('<polyline points="'+e.pts.map(p=>p[0].toFixed(1)+","+p[1].toFixed(1)).join(" ")+'" fill="none" stroke="'+col+'" stroke-width="'+(e.w||1.3)+'"'+(e.dashed?' stroke-dasharray="4 4"':"")+(e.noArrow?"":' marker-end="url(#'+(e.marker==="g"?"ahg":"ah")+')"')+'/>');
+    if(e.label){const a=e.pts[e.pts.length-2],b=e.pts[e.pts.length-1];
+      const big=e.label==="⊕";
+      if(Math.abs(a[1]-b[1])<1)o.push(textEl((a[0]+b[0])/2-3,a[1]-6,e.label,big?13:10,big?700:400,big?INK:SUB));
+      else o.push(textEl(a[0]+7,(a[1]+b[1])/2+4,e.label,big?13:10,big?700:400,big?INK:SUB,0,"start"));}
+  });
+  sc.rects.filter(r=>r.title).forEach(r=>{
+    const dx=r.tdx||10, mw=r.w-dx-10, w=Math.min(tw(r.title,11),mw);
+    o.push('<rect x="'+(r.x+dx-4)+'" y="'+(r.y+6)+'" width="'+(w+8).toFixed(1)+'" height="16" rx="3" fill="'+KIND.group.fill+'"/>');
+    o.push(textEl(r.x+dx,r.y+17.5,r.title,11,700,SUB,mw,"start"));});
+  sc.rects.filter(r=>!back(r)).forEach(drawRect);
+  sc.circles.forEach(q=>{
+    if(q.plus){const k=q.r-4;o.push('<circle cx="'+q.x.toFixed(1)+'" cy="'+q.y.toFixed(1)+'" r="'+q.r+'" fill="#FFFFFF" stroke="'+EDGE+'" stroke-width="1.3"/>');
+      o.push('<path d="M'+(q.x-k)+','+q.y+' h'+2*k+' M'+q.x+','+(q.y-k)+' v'+2*k+'" stroke="'+EDGE+'" stroke-width="1.3" fill="none"/>');}
+    else o.push('<circle cx="'+q.x.toFixed(1)+'" cy="'+q.y.toFixed(1)+'" r="'+q.r+'" fill="'+EDGE+'"/>');
+  });
+  sc.labels.forEach(l=>o.push(textEl(l.x,l.y+l.size*0.35,l.text,l.size,700,l.color||SUB,0,l.anchor)));
+  /* 图例：只列出这张图实际用到的颜色 */
+  const used=[];sc.rects.forEach(r=>{if(KIND[r.kind]&&KIND[r.kind].name&&!used.includes(r.kind))used.push(r.kind);});
+  let lx=24;const ly=bodyH+24;
+  Object.keys(KIND).filter(k=>used.includes(k)).forEach(k=>{
+    o.push('<rect x="'+lx+'" y="'+(ly-10)+'" width="14" height="12" rx="3" fill="'+KIND[k].fill+'" stroke="'+KIND[k].stroke+'" stroke-width="1.2"/>');
+    o.push(textEl(lx+20,ly,KIND[k].name,11,400,SUB,0,"start"));lx+=20+tw(KIND[k].name,11)+22;
+  });
+  if(sc.rects.some(r=>r.kind==="eon")){
+    o.push('<rect x="'+lx+'" y="'+(ly-10)+'" width="12" height="12" rx="2" fill="'+KIND.eon.fill+'" stroke="'+KIND.eon.stroke+'"/>');
+    o.push(textEl(lx+18,ly,"被选中的专家",11,400,SUB,0,"start"));
+  }
+  o.push('</svg>');
+  return {svg:o.join(""),W,H};
+}
+
+/* ---------- 界面 ---------- */
+function fmt(n){return n>=1e9?(n/1e9).toFixed(n>=1e11?0:1)+"B":n>=1e6?(n/1e6).toFixed(1)+"M":n>=1e3?(n/1e3).toFixed(1)+"K":String(n);}
+function render(){
+  const c=cfg();
+  document.querySelectorAll("[data-if]").forEach(el=>{
+    const s=el.getAttribute("data-if"),i=s.indexOf("=");
+    el.hidden=i<0?!st[s]:String(st[s.slice(0,i)])!==s.slice(i+1);});
+  $("#note-dit").hidden=!(c.dit&&(c.engram||c.oe));
+  /* 参数量按官方实现逐项算：注意力 = QKV + 输出投影 + 门；Dense FFN 中间维 = ⌊d·4·2/3⌋ 取整到 128 */
+  const nMoe=c.moeB-c.moeA+1, per=3*c.dh*c.eh, units=c.M*c.E, act=c.M*c.k, nm=c.dit?3:1, mm=c.mot?3:1;
+  const attn=4*c.d*c.d+c.d*c.ah, ffn=3*c.d*c.ffnI, sm=2*c.d*c.M*c.dh, se=3*c.d*c.eh;
+  const total=nMoe*(attn+units*per+units*c.dh+sm+se*(c.shared+nm*c.mshared))+2*c.dense*mm*(attn+ffn);
+  const active=nMoe*(attn+act*per+sm+se*(c.shared+c.mshared))+2*c.dense*(attn+ffn);
+  $("#stats").innerHTML=
+    "<span>总参数 ≈ <b>"+fmt(total)+"</b></span>"+
+    "<span>每 token 激活 ≈ <b>"+fmt(active)+"</b></span>"+
+    "<span>路由专家 <b>"+fmt(units*per*nMoe)+"</b></span>"+
+    "<span>专家单元/层 <b>"+units.toLocaleString("en-US")+"</b>，每 token 用 <b>"+act+"</b></span>"+
+    "<span>（按官方代码的层结构逐项估算，未计残差结构与输入输出适配层）</span>";
+  if(!c.showA&&!c.showB&&!c.showC&&!(c.showD&&(c.engram||c.oe))){$("#paper").innerHTML='<div style="padding:40px;font:14px sans-serif;color:#565E6C;line-height:1.5">上面三块至少勾一块。</div>';return;}
+  const probe=buildSVG(c,1);
+  if(zoom===null){const avail=$("#stage").clientWidth-40;zoom=Math.min(1.25,Math.max(0.8,avail/probe.W));}
+  $("#paper").innerHTML=buildSVG(c,zoom).svg;
+}
+function setUI(){
+  document.querySelectorAll("[data-k]").forEach(el=>{
+    const k=el.getAttribute("data-k");
+    if(el.type==="checkbox")el.checked=!!st[k];
+    else if(el.type==="radio")el.checked=String(st[k])===el.value;
+    else el.value=st[k];
+  });
+  renderCustom();
+}
+document.addEventListener("input",ev=>{
+  const el=ev.target,k=el.getAttribute&&el.getAttribute("data-k");if(!k)return;
+  if(el.type==="checkbox")st[k]=el.checked;
+  else if(el.type==="radio"){if(el.checked)st[k]=el.value;}
+  else if(el.type==="number"){if(el.value!==""&&isFinite(Number(el.value)))st[k]=Number(el.value);}
+  else st[k]=el.value;
+  persist();render();
+});
+function renderCustom(){
+  const box=$("#customList");box.textContent="";
+  st.custom.forEach((m,i)=>{
+    const row=document.createElement("div");row.className="crow";
+    const nm=document.createElement("input");nm.type="text";nm.className="nm";nm.id="c-name-"+i;nm.placeholder="模块名，例如 MTP Head";nm.value=m.name||"";nm.setAttribute("aria-label","模块名");
+    const del=document.createElement("button");del.type="button";del.textContent="删除";
+    const pos=document.createElement("select");pos.id="c-pos-"+i;pos.setAttribute("aria-label","插入位置");
+    Object.keys(POS).forEach(k=>{const o=document.createElement("option");o.value=k;o.textContent=POS[k];pos.appendChild(o);});pos.value=POS[m.pos]?m.pos:"post";
+    const ly=document.createElement("input");ly.type="text";ly.id="c-ly-"+i;ly.placeholder="层号，留空=所有层";ly.value=m.layers||"";ly.setAttribute("aria-label","生效的层");
+    const sp=document.createElement("span");
+    const upd=()=>{m.name=nm.value;m.pos=pos.value;m.layers=ly.value;ly.disabled=pos.value==="input"||pos.value==="out";persist();render();};
+    nm.addEventListener("input",upd);pos.addEventListener("input",upd);ly.addEventListener("input",upd);
+    del.addEventListener("click",()=>{st.custom.splice(i,1);persist();renderCustom();render();});
+    ly.disabled=pos.value==="input"||pos.value==="out";
+    row.append(nm,del,pos,ly,sp);box.appendChild(row);
+  });
+}
+$("#addCustom").addEventListener("click",()=>{st.custom.push({name:"新模块",pos:"post",layers:""});persist();renderCustom();render();
+  const el=$("#c-name-"+(st.custom.length-1));if(el){el.focus();el.select();}});
+$("#reset").addEventListener("click",()=>{const keep={dir:st.dir,showA:st.showA,showB:st.showB,showC:st.showC,showD:st.showD};st=Object.assign(clone(DEF),keep);persist();setUI();render();toast("已恢复成原版 MAGI-2 Preview");});
+$("#zin").addEventListener("click",()=>{zoom=Math.min(3,(zoom||1)*1.2);render();});
+$("#zout").addEventListener("click",()=>{zoom=Math.max(0.3,(zoom||1)/1.2);render();});
+$("#zfit").addEventListener("click",()=>{const w=buildSVG(cfg(),1).W;zoom=Math.max(0.3,($("#stage").clientWidth-40)/w);render();});
+
+let tt;function toast(s){const t=$("#toast");t.textContent=s;t.classList.add("on");clearTimeout(tt);tt=setTimeout(()=>t.classList.remove("on"),2600);}
+const dlP=(window.claude&&typeof window.claude.use==="function")?window.claude.use("downloads").catch(()=>null):Promise.resolve(null);
+async function saveFile(filename,data,mime){
+  const dl=await dlP;
+  if(dl){
+    try{await dl.save({filename,data});toast("已保存 "+filename);}
+    catch(e){if(e&&e.code==="declined")return;toast("没能保存（"+((e&&e.code)||"未知原因")+"），可以先用「复制 SVG」");}
+    return;
+  }
+  try{
+    const blob=data instanceof Blob?data:new Blob([data],{type:mime});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=filename;document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+    toast("如果没有开始下载，说明当前页面不允许下载，请用「复制 SVG」");
+  }catch(e){toast("当前页面不允许下载，请用「复制 SVG」");}
+}
+const fname=()=>"magi2-arch-"+st.mode+"-"+st.res;
+$("#copySvg").addEventListener("click",()=>{
+  const s=buildSVG(cfg(),1).svg;
+  navigator.clipboard.writeText(s).then(()=>toast("SVG 代码已复制，可以粘到 Figma / draw.io / PPT"),()=>toast("浏览器拒绝了复制"));
+});
+$("#dlSvg").addEventListener("click",()=>saveFile(fname()+".svg",'<?xml version="1.0" encoding="UTF-8"?>\n'+buildSVG(cfg(),1).svg,"image/svg+xml"));
+$("#dlPng").addEventListener("click",async()=>{
+  try{
+    const r=buildSVG(cfg(),1), url=URL.createObjectURL(new Blob([r.svg],{type:"image/svg+xml"}));
+    const img=new Image();await new Promise((ok,no)=>{img.onload=ok;img.onerror=no;img.src=url;});
+    const s=3, cv=document.createElement("canvas");cv.width=Math.round(r.W*s);cv.height=Math.round(r.H*s);
+    cv.getContext("2d").drawImage(img,0,0,cv.width,cv.height);URL.revokeObjectURL(url);
+    const blob=await new Promise(ok=>cv.toBlob(ok,"image/png"));
+    if(!blob)throw new Error("empty");
+    await saveFile(fname()+".png",blob,"image/png");
+  }catch(e){toast("PNG 生成失败，请改用 SVG");}
+});
+
+setUI();render();
+})();
+</script>
+</body>
+</html>
