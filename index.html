@@ -500,8 +500,9 @@ function buildC(c){
   const routed=c.M*c.dh;
   const win=rect(sc,0,y,totalW,lh(2),"moe",["split_linear，再按 head 切开",c.d+" → "+routed+" = "+c.M+" 头 × "+c.dh+" 维"]);
   edge(sc,[bot(nr),top(win)]);y+=win.h+26;
-  const S=Math.min(c.E,8), on=c.E<=8?Math.min(c.k,c.E):Math.max(1,Math.min(3,c.k)), more=c.E>8;
-  const rowW=S*11+(S-1)*3+(more?16:0), RH=lh(3), hh=padT+RH+20+11+20+44+padB, sums=[];
+  /* 每个 head 画一小片专家格子：亮的是 Router 选中的，各 head 选的不一样；格子数和亮的个数是示意，不是全量 */
+  const PER=10, S=Math.min(c.E,30), R=Math.ceil(S/PER), on=Math.min(c.k,c.E<=30?c.E:Math.floor(S/3)), more=c.E>S;
+  const rowW=Math.min(S,PER)*14-3, gridH=R*14-3, RH=lh(2), hh=padT+RH+20+gridH+38+44+padB, sums=[];
   cols.forEach((h,i)=>{
     const gx=xs[i]+off;
     if(h===null){sc.labels.push({x:gx+ellW/2,y:y+hh/2,text:"···",size:18});return;}
@@ -510,11 +511,11 @@ function buildC(c){
     const rt=rect(sc,gx+7,y+padT,colW-14,RH,"moe",["Router "+h,c.E+" 个专家 · 选 Top-"+c.k]);
     edge(sc,[[ccx,win.y+win.h],top(rt)]);
     const sy=rt.y+rt.h+20, sx=ccx-rowW/2, pk=picks(h,S,on);
-    for(let j=0;j<S;j++)rect(sc,sx+j*14,sy,11,11,pk.has(j)?"eon":"eoff",[],{sq:true});
-    if(more)sc.labels.push({x:sx+S*14+6,y:sy+6,text:"…",size:12});
+    for(let j=0;j<S;j++)rect(sc,sx+(j%PER)*14,sy+Math.floor(j/PER)*14,11,11,pk.has(j)?"eon":"eoff",[],{sq:true});
+    sc.labels.push({x:ccx,y:sy+gridH+13,text:(more?"… 共 ":"共 ")+c.E+" 个，选中 "+c.k+" 个",size:10,color:"#565E6C"});
     edge(sc,[bot(rt),[ccx,sy-3]]);
-    const sm=rect(sc,gx+7,sy+11+20,colW-14,44,"moe",["Σ pᵢ · Eᵢ(x)","激活 "+c.k+" / "+c.E+" 专家"]);
-    edge(sc,[[ccx,sy+14],top(sm)]);sums.push(sm);
+    const sm=rect(sc,gx+7,sy+gridH+38,colW-14,44,"moe",["加权求和","只算选中的 "+c.k+" 个专家"]);
+    edge(sc,[[ccx,sy+gridH+21],top(sm)]);sums.push(sm);
   });
   const hy=y;y+=hh+26;
   const wout=rect(sc,0,y,totalW,lh(2),"moe",["按 head 拼回 → merge_linear",routed+" → "+c.d]);
