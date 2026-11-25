@@ -101,15 +101,15 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
     </div>
     <div class="grid">
       <label class="f">总层数<input type="number" id="f-L" data-k="L" min="3" max="200"></label>
-      <label class="f">两端 Dense 层（每端）<input type="number" id="f-dense" data-k="dense" min="0" max="50"></label>
+      <label class="f">两端 MoT 层数（每端）<input type="number" id="f-dense" data-k="dense" min="0" max="50"></label>
       <label class="f">隐藏维度 d<input type="number" id="f-d" data-k="d" min="64" step="64"></label>
       <label class="f">注意力头数<input type="number" id="f-ah" data-k="ah" min="1" max="256"></label>
     </div>
     <label class="chk"><input type="checkbox" id="f-sink" data-k="sink">学习型 attention sink</label>
     <label class="chk"><input type="checkbox" id="f-gate" data-k="gate">注意力输出 sigmoid 门</label>
     <div class="sub" data-if="mode=dit" style="margin:10px 0 2px;font-size:12px;color:#565E6C">MoT：哪些权重按模态各一套</div>
-    <label class="chk" data-if="mode=dit"><input type="checkbox" id="f-motq" data-k="motQ">两端 Dense 层的 QKV</label>
-    <label class="chk" data-if="mode=dit"><input type="checkbox" id="f-motf" data-k="motF">两端 Dense 层的 FFN</label>
+    <label class="chk" data-if="mode=dit"><input type="checkbox" id="f-motq" data-k="motQ">两端层的 QKV</label>
+    <label class="chk" data-if="mode=dit"><input type="checkbox" id="f-motf" data-k="motF">两端层的 FFN</label>
     <label class="chk" data-if="mode=dit"><input type="checkbox" id="f-motm" data-k="motM">中间 MoE 层的 QKV</label>
     <label class="chk" data-if="mode=dit"><input type="checkbox" id="f-refiner" data-k="refiner">1080p Refiner 阶段</label>
   </section>
@@ -304,8 +304,8 @@ function buildA(c){
     let s=cu("pre");
     if(el.length)s.push({lines:["Engram 门控注入","仅层 "+el.join(", ")],kind:"mem",eng:true,moe:isMoe});
     /* QKV 只有一套时也画出 QKV 小框，和每模态一套的画法保持一致 */
-    s.push(motA?{lines:[],cap:"Self-Attention · 全序列联合",tri:["视频 QKV","音频 QKV","文本 QKV"],kind:"attn",mix:true,h:72}
-              :{lines:[],cap:"Self-Attention · "+(c.dit?"全序列联合":"因果"),tri:[(c.dit?"QKV · 所有模态共用一套 · ":"QKV · 一套 · ")+c.ah+" 头 × "+Math.round(c.d/c.ah)+" 维"],kind:"attn",mix:true,h:72});
+    s.push(motA?{lines:[],cap:"Self-Attention",tri:["视频 QKV","音频 QKV","文本 QKV"],kind:"attn",mix:true,h:72}
+              :{lines:[],cap:c.dit?"Self-Attention":"Self-Attention · 因果",tri:[(c.dit?"QKV · 所有模态共用一套 · ":"QKV · 一套 · ")+c.ah+" 头 × "+Math.round(c.d/c.ah)+" 维"],kind:"attn",mix:true,h:72});
     s=s.concat(cu("mid"));
     const nsh=c.shared+c.mshared;
     s.push(isMoe?{lines:["Multi-Head LatentMoE",c.M+" 头 × "+c.E+" 专家 · 每头 Top-"+c.k].concat(nsh?["并联："+(c.shared?"共享专家":"")+(c.shared&&c.mshared?" ＋ ":"")+(c.mshared?"模态专家":"")]:[]),kind:"moe",mix:true}
@@ -336,9 +336,10 @@ function buildA(c){
     g.h=iy-8+padB-y;y+=g.h+GAP;return g;
   };
   const dt=c.motQ&&c.motF?"QKV、FFN 每模态一套":c.motQ?"QKV 每模态一套":c.motF?"FFN 每模态一套":"";
-  if(c.dense>0)group("Dense 层 × "+c.dense+" · "+rng(0,c.dense-1),subs(0,c.dense-1,false),dt);
+  const endName=(c.motQ||c.motF)?"MoT 层 × ":"Dense 层 × ";
+  if(c.dense>0)group(endName+c.dense+" · "+rng(0,c.dense-1),subs(0,c.dense-1,false),dt);
   const moe=group("Multi-Head MoE 层 × "+(c.moeB-c.moeA+1)+" · "+rng(c.moeA,c.moeB),subs(c.moeA,c.moeB,true),c.motM?"QKV 每模态一套":"");
-  if(c.dense>0)group("Dense 层 × "+c.dense+" · "+rng(c.L-c.dense,c.L-1),subs(c.L-c.dense,c.L-1,false),dt);
+  if(c.dense>0)group(endName+c.dense+" · "+rng(c.L-c.dense,c.L-1),subs(c.L-c.dense,c.L-1,false),dt);
 
   c.custom.filter(m=>m.pos==="out").forEach(m=>node([m.name],"custom"));
   if(c.dit){
@@ -550,7 +551,7 @@ function shift(sc,dx,dy){
 
 const KIND={
   io:{fill:"#F2F3F6",stroke:"#6B7280",name:"输入 / 输出"},
-  dense:{fill:"#E3E7EE",stroke:"#4B5563",name:"Dense 层"},
+  dense:{fill:"#E3E7EE",stroke:"#4B5563",name:"Dense FFN"},
   attn:{fill:"#DCE8FB",stroke:"#2F5FB3",name:"注意力"},
   moe:{fill:"#FCE9C8",stroke:"#B7791F",name:"MoE 路由与专家"},
   shared:{fill:"#FFF6DF",stroke:"#B7791F",name:"共享专家"},
