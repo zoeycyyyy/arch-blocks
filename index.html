@@ -344,9 +344,9 @@ function buildA(c){
   if(c.dit){
     const smp=node(["PostAdapter：视频、音频各一套","RMSNorm("+sdim+") → Linear → 48 / 64 通道","输出速度场 v · 文本 token 不出结果"],"io");
     /* 采样是套在整个模型外面的循环：每步用输出的速度场更新加噪 latent，再送回输入 */
-    const lx0=MX-27, ly0=smp.y+smp.h/2, ly1=pack.y+pack.h/2, lbh=lh(4);
+    const lx0=MX-27, ly0=smp.y+smp.h/2, ly1=pack.y+pack.h/2, lbh=lh(1), lbw=124;
     edge(sc,[[MX,ly0],[lx0,ly0],[lx0,ly1],[MX,ly1]],{w:2});
-    rect(sc,lx0-SW,(ly0+ly1)/2-lbh/2,SW,lbh,"io",["采样循环 × 100 步","每步：用速度场 v 更新 latent","Flow UniPC · shift 7","CFG：视频 5.0 / 音频 7.0"]);
+    rect(sc,lx0-lbw,(ly0+ly1)/2-lbh/2,lbw,lbh,"io",["采样循环 × 100 步"]);
     /* 音频只在预览阶段生成；Refiner 只接视频 latent */
     const hw=(MW-12)/2, lx=MX, rx=MX+hw+12, hb=smp.y+smp.h;let y2=y, vfrom=[lx+hw/2,hb];
     if(c.refiner){const rf=rect(sc,lx,y,hw,lh(4),"dense",["Refiner（另一套权重）","latent 上采样 + 重新加噪","30 层 · 宽 4096 · 5 步","普通残差 · 局部窗口注意力"]);
