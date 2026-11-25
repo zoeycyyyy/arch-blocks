@@ -193,7 +193,7 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
     </div>
     <div class="grp"><span class="lbl">缩放</span>
       <button id="zout" type="button" aria-label="缩小">−</button>
-      <button id="zfit" type="button">适应宽度</button>
+      <button id="zfit" type="button">适应屏幕</button>
       <button id="zin" type="button" aria-label="放大">＋</button>
     </div>
     <span class="sp"></span>
@@ -220,7 +220,7 @@ const DEF={mode:"dit",dir:"down",L:40,dense:2,d:3072,ah:24,sink:true,gate:true,r
   custom:[],showA:true,showB:true,showC:true,showD:true};
 const POS={input:"输入嵌入旁",pre:"层内 · Attention 前",mid:"层内 · Attention 与 MoE 之间",post:"层内 · MoE 后",out:"输出头前"};
 const clone=o=>JSON.parse(JSON.stringify(o));
-let st=load(), zoom=null;
+let st=load(), zoom=null, autoFit=true;
 function load(){
   try{let j=JSON.parse(localStorage.getItem(KEY));
     if(!j){ /* 旧版设置迁移：方向改用新默认（输入在上），mot 拆成 QKV / FFN 两项 */
@@ -676,7 +676,9 @@ function render(){
     "<span>（按官方代码的层结构逐项估算，未计残差结构与输入输出适配层）</span>";
   if(!c.showA&&!c.showB&&!c.showC&&!(c.showD&&(c.engram||c.oe))){$("#paper").innerHTML='<div style="padding:40px;font:14px sans-serif;color:#565E6C;line-height:1.5">上面三块至少勾一块。</div>';return;}
   const probe=buildSVG(c,1);
-  if(zoom===null){const avail=$("#stage").clientWidth-40;zoom=Math.min(1.25,Math.max(0.8,avail/probe.W));}
+  /* 自适应：整张图缩放到当前窗口里刚好放下（宽、高都不超出）；手动缩放后停止自适应，点“适应屏幕”恢复 */
+  if(autoFit||zoom===null){const st=$("#stage"),aw=st.clientWidth-44,ah=st.clientHeight-48;
+    zoom=Math.min(1.6,Math.max(0.2,Math.min(aw/probe.W,ah>200?ah/probe.H:Infinity)));}
   $("#paper").innerHTML=buildSVG(c,zoom).svg;
 }
 function setUI(){
@@ -716,9 +718,10 @@ function renderCustom(){
 $("#addCustom").addEventListener("click",()=>{st.custom.push({name:"新模块",pos:"post",layers:""});persist();renderCustom();render();
   const el=$("#c-name-"+(st.custom.length-1));if(el){el.focus();el.select();}});
 $("#reset").addEventListener("click",()=>{const keep={dir:st.dir,showA:st.showA,showB:st.showB,showC:st.showC,showD:st.showD};st=Object.assign(clone(DEF),keep);persist();setUI();render();toast("已恢复成原版 MAGI-2 Preview");});
-$("#zin").addEventListener("click",()=>{zoom=Math.min(3,(zoom||1)*1.2);render();});
-$("#zout").addEventListener("click",()=>{zoom=Math.max(0.3,(zoom||1)/1.2);render();});
-$("#zfit").addEventListener("click",()=>{const w=buildSVG(cfg(),1).W;zoom=Math.max(0.3,($("#stage").clientWidth-40)/w);render();});
+$("#zin").addEventListener("click",()=>{autoFit=false;zoom=Math.min(3,(zoom||1)*1.2);render();});
+$("#zout").addEventListener("click",()=>{autoFit=false;zoom=Math.max(0.3,(zoom||1)/1.2);render();});
+$("#zfit").addEventListener("click",()=>{autoFit=true;render();});
+let rzT=null;window.addEventListener("resize",()=>{if(!autoFit)return;clearTimeout(rzT);rzT=setTimeout(render,120);});
 
 let tt;function toast(s){const t=$("#toast");t.textContent=s;t.classList.add("on");clearTimeout(tt);tt=setTimeout(()=>t.classList.remove("on"),2600);}
 const dlP=(window.claude&&typeof window.claude.use==="function")?window.claude.use("downloads").catch(()=>null):Promise.resolve(null);
