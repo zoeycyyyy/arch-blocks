@@ -277,14 +277,14 @@ function buildA(c){
   let y=0, from=null, busTo=null;
   const node=(lines,kind,o)=>{const h=lh(lines.length);const r=rect(sc,MX,y,MW,h,kind,lines,o);if(from)edge(sc,[from,top(r)]);
     if(bus&&!from&&!busTo&&pre)busTo=r;from=bot(r);y+=h+GAP;return r;};
-  let pre=null;
+  let pre=null, pack=null;
   if(c.dit){
     const bw=(MW-20)/3, ins=[["视频 latent","Wan2.2 VAE","加噪 · 48 通道"],["音频 latent","Stable Audio","加噪 · 64 通道"],["文本特征","Qwen3.5-27B","末层 · 5120 维"]]
       .map((l,i)=>rect(sc,MX+i*(bw+10),y,bw,lh(3),"io",l));
     y+=lh(3)+GAP;
     const pk=rect(sc,MX,y,MW,lh(3),"io",["打包为单一序列","视频 → 音频 → 文本（I2V 再接参考图 token）","无 cross-attention · 无 adaLN"]);
     ins.forEach(r=>edge(sc,[bot(r),[r.x+r.w/2,pk.y]]));
-    from=bot(pk);y+=pk.h+GAP;
+    pack=pk;from=bot(pk);y+=pk.h+GAP;
     pre=node(["PreAdapter：每个模态一个 Linear","48 / 64 / 5120 → "+sdesc,"时间步：64 维正弦编码覆盖前 64 通道"],"io");
   }else{
     node(["Token IDs"],"io");
@@ -342,8 +342,11 @@ function buildA(c){
 
   c.custom.filter(m=>m.pos==="out").forEach(m=>node([m.name],"custom"));
   if(c.dit){
-    node(["PostAdapter：视频、音频各一套","RMSNorm("+sdim+") → Linear → 48 / 64 通道","输出速度场 v · 文本 token 不出结果"],"io");
-    const smp=node(["采样循环（模型外）","Flow UniPC · 100 步 · shift 7","CFG：视频 5.0 / 音频 7.0 · 每步条件、无条件各算一次"],"io");
+    const smp=node(["PostAdapter：视频、音频各一套","RMSNorm("+sdim+") → Linear → 48 / 64 通道","输出速度场 v · 文本 token 不出结果"],"io");
+    /* 采样是套在整个模型外面的循环：每步用输出的速度场更新加噪 latent，再送回输入 */
+    const lx0=MX-27, ly0=smp.y+smp.h/2, ly1=pack.y+pack.h/2, lbh=lh(4);
+    edge(sc,[[MX,ly0],[lx0,ly0],[lx0,ly1],[MX,ly1]],{w:2});
+    rect(sc,lx0-SW,(ly0+ly1)/2-lbh/2,SW,lbh,"io",["采样循环 × 100 步","每步：用速度场 v 更新 latent","Flow UniPC · shift 7","CFG：视频 5.0 / 音频 7.0"]);
     /* 音频只在预览阶段生成；Refiner 只接视频 latent */
     const hw=(MW-12)/2, lx=MX, rx=MX+hw+12, hb=smp.y+smp.h;let y2=y, vfrom=[lx+hw/2,hb];
     if(c.refiner){const rf=rect(sc,lx,y,hw,lh(4),"dense",["Refiner（另一套权重）","latent 上采样 + 重新加噪","30 层 · 宽 4096 · 5 步","普通残差 · 局部窗口注意力"]);
@@ -382,12 +385,12 @@ function buildB(c){
   const wlab=mhc?N+" × "+c.d:"D′ = "+Math.round(c.vn/c.vm*c.d);
   const stream=!bus?"x · "+c.d+" 维":mhc?N+" 条残差流 · 每条 "+c.d+" 维":"over-width 隐状态 · "+N+" 段 × "+Math.round(c.d/c.vm)+" 维";
   const inR=rect(sc,x0,0,CW,lh(2),"io",["第 ℓ 层输入",stream]);
-  let from=[cx,inR.h], moeR=null, first=true;
-  const pre=mhc?{lines:["Pre Mapping · H_pre",N+" 条流加权求和 → 1 路，权重 σ(·)"],kind:"res"}
-               :{lines:["GHC 读入 · Å","over-width 的 "+N+" 段 → 骨干的 "+c.vm+" 段"],kind:"res"};
-  const post=mhc?{lines:["Post Mapping · H_post","1 路 → 分发回 "+N+" 条流，权重 2σ(·)"],kind:"res"}
-                :{lines:["GHC 写回 · B","骨干的 "+c.vm+" 段 → over-width 的 "+N+" 段"],kind:"res"};
-  const mixL=mhc?["Res Mapping · H_res",N+"×"+N+" 双随机矩阵","Sinkhorn-Knopp × 20"]:["GHC 跨层传递 · Â",N+"×"+N+" 段间混合","宽状态不经过子层"];
+  let from=[cx,inR.h], moeR=null, first=true, coefDone=false;
+  const pre=mhc?{lines:["Pre Mapping · H_pre","x = Σ H_pre[i] · 流 i（"+N+" → 1）","H_pre = σ(·)，每条流一个权重"],kind:"res"}
+               :{lines:["GHC 读入 · Å","x = Å · H′（"+N+" 段 → 骨干的 "+c.vm+" 段）"],kind:"res"};
+  const post=mhc?{lines:["Post Mapping · H_post","流 i ＋= H_post[i] · F(x)（1 → "+N+"）","H_post = 2σ(·)，每条流一个权重"],kind:"res"}
+                :{lines:["GHC 写回 · B","H′ ＋= B · F(x)（"+c.vm+" 段 → "+N+" 段）"],kind:"res"};
+  const mixL=mhc?["Res Mapping · H_res","流 ← H_res · 流",N+"×"+N+" 双随机矩阵","Sinkhorn-Knopp × 20"]:["GHC 跨层传递 · Â","H′ ← Â · H′",N+"×"+N+" 段间混合","宽状态不经过子层"];
   /* mode: main = 注意力/MoE；side = 自定义子层；direct = 直接读写宽状态（Engram 在多流下逐流门控、逐流加回） */
   function unit(core,mode,normLabel){
     const main=mode==="main", wrap=bus&&mode!=="direct", boxes=[];
@@ -401,7 +404,14 @@ function buildB(c){
       else edge(sc,[bot(p),top(r)],pb.role==="pre"&&first?{label:c.d+" 维"}:null);
       p=r;pb=b;R[b.role]=r;yy+=h+16;});
     const py=yy+8;edge(sc,[bot(p),[cx,py-9]],wide);
-    if(bus&&main){const mh=lh(3),my=(yb+py)/2-mh/2;
+    if(mhc&&main&&R.pre&&R.post&&!coefDone){coefDone=true;
+      /* 三个映射的系数不是固定参数：每个 token 由当前的全部流现算 */
+      const kw=176, kx=x0+CW+26, kh=lh(5), ky=(R.pre.y+R.post.y+R.post.h)/2-kh/2, dz={dashed:true,color:G};
+      const k=rect(sc,kx,ky,kw,kh,"res",["系数按 token 现算",N+" 条流拼成 "+N*c.d+" 维","→ RMSNorm → 线性层","→ H_pre、H_post、H_res","每个子层各算一套"]);
+      edge(sc,[[kx+kw/2,ky],[kx+kw/2,R.pre.y+R.pre.h/2],[x0+CW,R.pre.y+R.pre.h/2]],dz);
+      edge(sc,[[kx+kw/2,ky+kh],[kx+kw/2,R.post.y+R.post.h/2],[x0+CW,R.post.y+R.post.h/2]],dz);
+    }
+    if(bus&&main){const mh=lh(mixL.length),my=(yb+py)/2-mh/2;
       edge(sc,[[cx,yb],[skipX,yb],[skipX,my]],wide);rect(sc,skipX-mixW/2,my,mixW,mh,"res",mixL);
       edge(sc,[[skipX,my+mh],[skipX,py],[cx-9,py]],wide);}
     else edge(sc,[[cx,yb],[skipX,yb],[skipX,py],[cx-9,py]],Object.assign({label:bus?"直通":"恒等"},wide||{}));
@@ -558,7 +568,7 @@ const FONT="'Helvetica Neue',Helvetica,Arial,'PingFang SC','Microsoft YaHei','No
 
 function compose(c){
   const panels=[];
-  if(c.showA){const a=buildA(c);panels.push(Object.assign(a,{id:"A",title:"整体架构",sub:(c.dit?"MAGI-2 Preview 预览阶段 Transformer":"MAGI-2 底座 · 语言模型形态")+" · "+c.L+" 层 · 宽度 "+c.d}));}
+  if(c.showA){const a=buildA(c);panels.push(Object.assign(a,{id:"A",title:"整体架构",sub:(c.dit?"MAGI-2 Preview":"MAGI-2 底座 · 语言模型形态")+" · "+c.L+" 层 · 宽度 "+c.d}));}
   if(c.showB){const b=buildB(c);panels.push(Object.assign(b,{id:"B",title:"单层 Block 展开",sub:"MoE 层（"+rng(c.moeA,c.moeB)+"）· "+(c.res==="std"?"每个子层：x ← x + F(x)":c.res==="mhc"?"每个子层：x ← H_res·x + H_post·F(H_pre·x)；三个 H 都由 RMSNorm(全部流) → 线性层按 token 现算":"每个子层：H′ ← Â·H′ + B·F(Å·H′)；F 只在骨干宽度 D 上计算")}));}
   if(c.showC){const m=buildC(c);panels.push(Object.assign(m,{id:"C",title:"Multi-Head LatentMoE 展开",sub:"每个路由专家："+c.dh+" → "+c.eh+" → "+c.dh+" · SwiGLU7"}));}
   if(c.showD&&c.engram&&c.engL.length)panels.push(Object.assign(buildD(c),{id:"D",title:"Engram 展开",sub:"查表 → 上下文门控 → 卷积 → 加回残差流"}));
