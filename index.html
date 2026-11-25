@@ -506,7 +506,7 @@ function buildC(c){
     if(h===null){sc.labels.push({x:gx+ellW/2,y:y+hh/2,text:"···",size:18});return;}
     const ccx=gx+colW/2;
     rect(sc,gx,y,colW,hh,"group",[],{title:"Head "+h+" · "+c.dh+" 维"});
-    const rt=rect(sc,gx+7,y+padT,colW-14,RH,"moe",["Router "+h+" · FP32","sigmoid · Top-"+c.k+" / "+c.E,"权重 L1 归一 × 4.9"]);
+    const rt=rect(sc,gx+7,y+padT,colW-14,RH,"moe",["Router "+h,c.E+" 个专家 · 选 Top-"+c.k]);
     edge(sc,[[ccx,win.y+win.h],top(rt)]);
     const sy=rt.y+rt.h+20, sx=ccx-rowW/2, pk=picks(h,S,on);
     for(let j=0;j<S;j++)rect(sc,sx+j*14,sy,11,11,pk.has(j)?"eon":"eoff",[],{sq:true});
