@@ -101,16 +101,14 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
     </div>
     <div class="grid">
       <label class="f">总层数<input type="number" id="f-L" data-k="L" min="3" max="200"></label>
-      <label class="f">两端 MoT 层数（每端）<input type="number" id="f-dense" data-k="dense" min="0" max="50"></label>
+      <label class="f">两端 Dense FFN 层数（每端）<input type="number" id="f-dense" data-k="dense" min="0" max="50"></label>
+      <label class="f wide" data-if="mode=dit">MoT 层数：QKV 按模态各一套（每端；填到总层数的一半即全部层）<input type="number" id="f-mq" data-k="mq" min="0" max="200"></label>
       <label class="f">隐藏维度 d<input type="number" id="f-d" data-k="d" min="64" step="64"></label>
       <label class="f">注意力头数<input type="number" id="f-ah" data-k="ah" min="1" max="256"></label>
     </div>
     <label class="chk"><input type="checkbox" id="f-sink" data-k="sink">学习型 attention sink</label>
     <label class="chk"><input type="checkbox" id="f-gate" data-k="gate">注意力输出 sigmoid 门</label>
-    <div class="sub" data-if="mode=dit" style="margin:10px 0 2px;font-size:12px;color:#565E6C">MoT：哪些权重按模态各一套</div>
-    <label class="chk" data-if="mode=dit"><input type="checkbox" id="f-motq" data-k="motQ">两端层的 QKV</label>
-    <label class="chk" data-if="mode=dit"><input type="checkbox" id="f-motf" data-k="motF">两端层的 FFN</label>
-    <label class="chk" data-if="mode=dit"><input type="checkbox" id="f-motm" data-k="motM">中间 MoE 层的 QKV</label>
+    <label class="chk" data-if="mode=dit"><input type="checkbox" id="f-motf" data-k="motF">两端 Dense FFN 也按模态各一套</label>
     <label class="chk" data-if="mode=dit"><input type="checkbox" id="f-refiner" data-k="refiner">1080p Refiner 阶段</label>
   </section>
 
@@ -212,7 +210,7 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 (function(){
 "use strict";
 const KEY="magi2-builder-v4", OLDKEY="magi2-builder-v3";
-const DEF={mode:"dit",dir:"down",L:40,dense:2,d:3072,ah:24,sink:true,gate:true,refiner:false,motQ:true,motF:true,motM:false,
+const DEF={mode:"dit",dir:"down",L:40,dense:2,d:3072,ah:24,sink:true,gate:true,refiner:false,mq:2,motF:true,
   M:12,dh:256,E:256,k:6,eh:1280,shared:1,mshared:1,
   res:"mhc",streams:4,vm:2,vn:3,
   engram:false,engLayers:"2, 15",engN:3,engK:8,
@@ -225,8 +223,10 @@ function load(){
   try{let j=JSON.parse(localStorage.getItem(KEY));
     if(!j){ /* 旧版设置迁移：方向改用新默认（输入在上），mot 拆成 QKV / FFN 两项 */
       j=JSON.parse(localStorage.getItem(OLDKEY));
-      if(j&&typeof j==="object"){delete j.dir;if(j.mot===false){j.motQ=false;j.motF=false;}delete j.mot;}
+      if(j&&typeof j==="object"){delete j.dir;if(j.mot===false){j.mq=0;j.motF=false;}delete j.mot;}
     }
+    if(j&&typeof j==="object"&&j.mq===undefined){ /* 上一版的两个勾选框并成一个层数 */
+      j.mq=j.motM?(Number(j.L)||40):j.motQ===false?0:(Number(j.dense)||2);delete j.motQ;delete j.motM;}
     if(j&&typeof j==="object") return Object.assign(clone(DEF),j,{custom:Array.isArray(j.custom)?j.custom:[]});}catch(e){}
   return clone(DEF);
 }
@@ -248,7 +248,7 @@ function cfg(){
   c.streams=int(c.streams,2,8,4); c.vn=int(c.vn,2,64,3); c.vm=int(c.vm,1,c.vn-1,2);
   c.engN=int(c.engN,2,5,3); c.engK=int(c.engK,1,32,8); c.oeN=int(c.oeN,2,5,3); c.oeK=int(c.oeK,1,16,4);
   c.engL=parseLayers(c.engLayers,c.L);
-  c.up=c.dir==="up"; c.dit=c.mode==="dit"; c.motQ=c.dit&&!!c.motQ; c.motF=c.dit&&!!c.motF; c.motM=c.dit&&!!c.motM;
+  c.up=c.dir==="up"; c.dit=c.mode==="dit"; c.motF=c.dit&&!!c.motF; c.mq=int(c.mq,0,c.L,2); c.mqe=c.dit?Math.min(c.mq,Math.ceil(c.L/2)):0; c.nq=Math.min(c.L,2*c.mqe);
   c.moeA=c.dense; c.moeB=c.L-c.dense-1;
   c.custom=(c.custom||[]).filter(m=>m&&String(m.name||"").trim()).map(m=>{
     const ls=parseLayers(m.layers,c.L);
@@ -296,11 +296,11 @@ function buildA(c){
   const attnSub=c.ah+" 头 × "+Math.round(c.d/c.ah)+" 维 · "+(c.dit?"全序列双向":"因果");
   const engBoxes=[];
   /* 一层里按数据流顺序排的子层：每个子层都挂在残差通路上 */
-  const subs=(a,b,isMoe)=>{
+  const subs=(a,b,isMoe,qPer)=>{
     const hit=m=>!m.layers.length||m.layers.some(l=>l>=a&&l<=b);
     const cu=pos=>c.custom.filter(m=>m.pos===pos&&hit(m)).map(m=>({lines:[m.name,m.lab],kind:"custom"}));
     const el=c.engram?c.engL.filter(l=>l>=a&&l<=b):[];
-    const motA=isMoe?c.motM:c.motQ, motFF=c.motF&&!isMoe;
+    const motA=qPer, motFF=c.motF&&!isMoe;
     let s=cu("pre");
     if(el.length)s.push({lines:["Engram 门控注入","仅层 "+el.join(", ")],kind:"mem",eng:true,moe:isMoe});
     /* QKV 只有一套时也画出 QKV 小框，和每模态一套的画法保持一致 */
@@ -335,11 +335,16 @@ function buildA(c){
     });
     g.h=iy-8+padB-y;y+=g.h+GAP;return g;
   };
-  const dt=c.motQ&&c.motF?"QKV、FFN 每模态一套":c.motQ?"QKV 每模态一套":c.motF?"FFN 每模态一套":"";
-  const endName=(c.motQ||c.motF)?"MoT 层 × ":"Dense 层 × ";
-  if(c.dense>0)group(endName+c.dense+" · "+rng(0,c.dense-1),subs(0,c.dense-1,false),dt);
-  const moe=group("Multi-Head MoE 层 × "+(c.moeB-c.moeA+1)+" · "+rng(c.moeA,c.moeB),subs(c.moeA,c.moeB,true),c.motM?"QKV 每模态一套":"");
-  if(c.dense>0)group(endName+c.dense+" · "+rng(c.L-c.dense,c.L-1),subs(c.L-c.dense,c.L-1,false),dt);
+  /* 逐层算出两件事：QKV 是否按模态分、FFN 是 Dense 还是 MoE；相邻且相同的层合成一组 */
+  const segs=[];
+  for(let l=0;l<c.L;l++){const q=l<c.mqe||l>=c.L-c.mqe, m=l>=c.dense&&l<c.L-c.dense, t=segs[segs.length-1];
+    if(t&&t.q===q&&t.m===m)t.b=l;else segs.push({a:l,b:l,q,m});}
+  let moe=null, moeLen=-1;
+  segs.forEach(g=>{const n=g.b-g.a+1, ff=!g.m&&c.motF;
+    const name=g.m?(g.q?"MoT · Multi-Head MoE 层 × ":"Multi-Head MoE 层 × "):((g.q||ff)?"MoT 层 × ":"Dense 层 × ");
+    const note=g.q&&ff?"QKV、FFN 每模态一套":g.q?"QKV 每模态一套":ff?"FFN 每模态一套":"";
+    const r=group(name+n+" · "+rng(g.a,g.b),subs(g.a,g.b,g.m,g.q),note);
+    if(g.m&&n>moeLen){moe=r;moeLen=n;}});
 
   c.custom.filter(m=>m.pos==="out").forEach(m=>node([m.name],"custom"));
   if(c.dit){
@@ -432,7 +437,7 @@ function buildB(c){
   }
   const aL=["Self-Attention","QKV → QK-Norm → "+(c.dit?"3D RoPE（t, h, w）":"RoPE"),
     c.ah+" 头 × "+Math.round(c.d/c.ah)+" 维 · "+(c.dit?"全序列双向":"因果")]
-    .concat(c.sink?["每头 1 个可学习 sink"]:[],[c.gate?"每头 sigmoid 门 → 输出投影":"输出投影"],c.dit?[c.motM?"QKV 每模态一套":"QKV 所有模态共用一套"]:[]);
+    .concat(c.sink?["每头 1 个可学习 sink"]:[],[c.gate?"每头 sigmoid 门 → 输出投影":"输出投影"],c.dit?[c.nq>=c.L?"QKV 每模态一套":c.mqe>c.dense?"QKV：两端各 "+c.mqe+" 层每模态一套":"QKV 所有模态共用一套"]:[]);
   unit({lines:aL,kind:"attn"},"main");
   cust("mid");
   const mL=["Multi-Head LatentMoE",c.M+" 头 × "+c.E+" 专家 · 每头 Top-"+c.k];
@@ -666,9 +671,9 @@ function render(){
     el.hidden=i<0?!st[s]:String(st[s.slice(0,i)])!==s.slice(i+1);});
   $("#note-dit").hidden=!(c.dit&&(c.engram||c.oe));
   /* 参数量按官方实现逐项算：注意力 = QKV + 输出投影 + 门；Dense FFN 中间维 = ⌊d·4·2/3⌋ 取整到 128 */
-  const nMoe=c.moeB-c.moeA+1, per=3*c.dh*c.eh, units=c.M*c.E, act=c.M*c.k, nm=c.dit?3:1, mq=c.motQ?3:1, mf=c.motF?3:1, mz=c.motM?3:1;
+  const nMoe=c.moeB-c.moeA+1, per=3*c.dh*c.eh, units=c.M*c.E, act=c.M*c.k, nm=c.dit?3:1, mf=c.motF?3:1;
   const attn=4*c.d*c.d+c.d*c.ah, ffn=3*c.d*c.ffnI, sm=2*c.d*c.M*c.dh, se=3*c.d*c.eh;
-  const total=nMoe*(mz*attn+units*per+units*c.dh+sm+se*(c.shared+nm*c.mshared))+2*c.dense*(mq*attn+mf*ffn);
+  const total=nMoe*(units*per+units*c.dh+sm+se*(c.shared+nm*c.mshared))+2*c.dense*mf*ffn+(c.L+2*c.nq)*attn;
   const active=nMoe*(attn+act*per+sm+se*(c.shared+c.mshared))+2*c.dense*(attn+ffn);
   $("#stats").innerHTML=
     "<span>总参数 ≈ <b>"+fmt(total)+"</b></span>"+
