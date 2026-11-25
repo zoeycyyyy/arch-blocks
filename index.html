@@ -296,8 +296,9 @@ function buildA(c){
     const mot=c.mot&&!isMoe;
     let s=cu("pre");
     if(el.length)s.push({lines:["Engram 门控注入","仅层 "+el.join(", ")],kind:"mem",eng:true,moe:isMoe});
-    s.push(mot?{lines:[],cap:"Self-Attention · 全序列联合",tri:W3,kind:"attn",mix:true,h:72}
-              :{lines:["Self-Attention",attnSub].concat(c.dit?["所有模态共用一套权重"]:[]),kind:"attn",mix:true});
+    /* QKV 只有一套时也画出 QKV 小框，和每模态一套的画法保持一致 */
+    s.push(mot?{lines:[],cap:"Self-Attention · 全序列联合",tri:["视频 QKV","音频 QKV","文本 QKV"],kind:"attn",mix:true,h:72}
+              :{lines:[],cap:"Self-Attention · "+(c.dit?"全序列联合":"因果"),tri:[(c.dit?"QKV · 所有模态共用一套 · ":"QKV · 一套 · ")+c.ah+" 头 × "+Math.round(c.d/c.ah)+" 维"],kind:"attn",mix:true,h:72});
     s=s.concat(cu("mid"));
     const nsh=c.shared+c.mshared;
     s.push(isMoe?{lines:["Multi-Head LatentMoE",c.M+" 头 × "+c.E+" 专家 · 每头 Top-"+c.k].concat(nsh?["并联："+(c.shared?"共享专家":"")+(c.shared&&c.mshared?" ＋ ":"")+(c.mshared?"模态专家":"")]:[]),kind:"moe",mix:true}
@@ -325,7 +326,7 @@ function buildA(c){
       if(it.tri){
         /* 这几层所有权重按模态各有一套，但注意力仍在整条序列上一起算 */
         sc.labels.push({x:r.x+r.w/2,y:r.y+19,text:it.cap,size:12,color:INK});
-        const mw=(r.w-16-12)/3;
+        const nt=it.tri.length, mw=(r.w-16-6*(nt-1))/nt;
         it.tri.forEach((t,i)=>rect(sc,r.x+8+i*(mw+6),r.y+r.h-32,mw,22,"norm",[t],{tiny:true}));
       }
       if(it.eng){r.inMoe=it.moe;engBoxes.push(r);}
