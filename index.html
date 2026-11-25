@@ -273,19 +273,19 @@ function buildA(c){
   const padT=c.up?14:28, padB=c.up?28:14;
   const bus=c.res!=="std", mhc=c.res==="mhc", N=mhc?c.streams:c.vn, bx=MX+24, G=KIND.res.stroke;
   const sdim=mhc?N*c.d:bus?Math.round(c.vn/c.vm*c.d):c.d;
-  const sdesc=mhc?N+" 条流 × "+c.d+" = "+sdim+" 维":bus?"D′ = "+sdim+" 维（"+N+" 段）":c.d+" 维";
+  const sdesc=mhc?N+" 条流 × "+c.d+" 维":bus?N+" 段，共 "+sdim+" 维":c.d+" 维";
   let y=0, from=null, busTo=null;
   const node=(lines,kind,o)=>{const h=lh(lines.length);const r=rect(sc,MX,y,MW,h,kind,lines,o);if(from)edge(sc,[from,top(r)]);
     if(bus&&!from&&!busTo&&pre)busTo=r;from=bot(r);y+=h+GAP;return r;};
   let pre=null, pack=null;
   if(c.dit){
-    const bw=(MW-20)/3, ins=[["视频 latent","Wan2.2 VAE","加噪 · 48 通道"],["音频 latent","Stable Audio","加噪 · 64 通道"],["文本特征","Qwen3.5-27B","末层 · 5120 维"]]
-      .map((l,i)=>rect(sc,MX+i*(bw+10),y,bw,lh(3),"io",l));
-    y+=lh(3)+GAP;
-    const pk=rect(sc,MX,y,MW,lh(3),"io",["打包为单一序列","视频 → 音频 → 文本（I2V 再接参考图 token）","无 cross-attention · 无 adaLN"]);
+    const bw=(MW-20)/3, ins=[["视频 latent","48 通道"],["音频 latent","64 通道"],["文本特征","5120 维"]]
+      .map((l,i)=>rect(sc,MX+i*(bw+10),y,bw,lh(2),"io",l));
+    y+=lh(2)+GAP;
+    const pk=rect(sc,MX,y,MW,lh(2),"io",["拼成一条序列","视频 → 音频 → 文本"]);
     ins.forEach(r=>edge(sc,[bot(r),[r.x+r.w/2,pk.y]]));
     pack=pk;from=bot(pk);y+=pk.h+GAP;
-    pre=node(["PreAdapter：每个模态一个 Linear","48 / 64 / 5120 → "+sdesc,"时间步：64 维正弦编码覆盖前 64 通道"],"io");
+    pre=node(["PreAdapter","每个模态一个 Linear → "+sdesc],"io");
   }else{
     node(["Token IDs"],"io");
     pre=node(["Token Embedding","词表 → "+sdesc],"io");
@@ -305,10 +305,10 @@ function buildA(c){
     if(el.length)s.push({lines:["Engram 门控注入","仅层 "+el.join(", ")],kind:"mem",eng:true,moe:isMoe});
     /* QKV 只有一套时也画出 QKV 小框，和每模态一套的画法保持一致 */
     s.push(motA?{lines:[],cap:"Self-Attention",tri:["视频 QKV","音频 QKV","文本 QKV"],kind:"attn",mix:true,h:72}
-              :{lines:[],cap:c.dit?"Self-Attention":"Self-Attention · 因果",tri:[(c.dit?"QKV · 所有模态共用一套 · ":"QKV · 一套 · ")+c.ah+" 头 × "+Math.round(c.d/c.ah)+" 维"],kind:"attn",mix:true,h:72});
+              :{lines:[],cap:c.dit?"Self-Attention":"Self-Attention · 因果",tri:[c.dit?"QKV · 模态共享":"QKV"],kind:"attn",mix:true,h:72});
     s=s.concat(cu("mid"));
     const nsh=c.shared+c.mshared;
-    s.push(isMoe?{lines:["Multi-Head LatentMoE",c.M+" 头 × "+c.E+" 专家 · 每头 Top-"+c.k].concat(nsh?["并联："+(c.shared?"共享专家":"")+(c.shared&&c.mshared?" ＋ ":"")+(c.mshared?"模态专家":"")]:[]),kind:"moe",mix:true}
+    s.push(isMoe?{lines:["Multi-Head LatentMoE",c.M+" 头 × "+c.E+" 专家 · 每头 Top-"+c.k].concat(nsh?["＋ "+(c.shared?"共享专家":"")+(c.shared&&c.mshared?"、":"")+(c.mshared?"模态专家":"")]:[]),kind:"moe",mix:true}
                 :motFF?{lines:[],cap:"Dense FFN "+c.d+"→"+c.ffnI+"→"+c.d,tri:["视频 FFN","音频 FFN","文本 FFN"],kind:"dense",mix:true,h:72}
                 :{lines:["Dense FFN",c.d+" → "+c.ffnI+" → "+c.d+" · SwiGLU"],kind:"dense",mix:true});
     return s.concat(cu("post"));
@@ -348,7 +348,7 @@ function buildA(c){
 
   c.custom.filter(m=>m.pos==="out").forEach(m=>node([m.name],"custom"));
   if(c.dit){
-    const smp=node(["PostAdapter：视频、音频各一套","RMSNorm("+sdim+") → Linear → 48 / 64 通道","输出速度场 v · 文本 token 不出结果"],"io");
+    const smp=node(["PostAdapter","视频、音频各一个 Linear → 速度场"],"io");
     /* 采样是套在整个模型外面的循环：每步用输出的速度场更新加噪 latent，再送回输入 */
     const lx0=MX-27, ly0=smp.y+smp.h/2, ly1=pack.y+pack.h/2, lbh=lh(1), lbw=124;
     edge(sc,[[MX,ly0],[lx0,ly0],[lx0,ly1],[MX,ly1]],{w:2});
@@ -357,8 +357,8 @@ function buildA(c){
     const hw=(MW-12)/2, lx=MX, rx=MX+hw+12, hb=smp.y+smp.h;let y2=y, vfrom=[lx+hw/2,hb];
     if(c.refiner){const rf=rect(sc,lx,y,hw,lh(4),"dense",["Refiner（另一套权重）","latent 上采样 + 重新加噪","30 层 · 宽 4096 · 5 步","普通残差 · 局部窗口注意力"]);
       edge(sc,[vfrom,top(rf)]);vfrom=bot(rf);y2=y+rf.h+GAP;}
-    const vd=rect(sc,lx,y2,hw,46,"io",["TurboVAE 解码",c.refiner?"视频 1088×1920 · 25 fps":"视频 512×896 · 12.5 fps"]);
-    const ad=rect(sc,rx,y2,hw,46,"io",["Stable Audio VAE 解码","音频 44.1 kHz"]);
+    const vd=rect(sc,lx,y2,hw,46,"io",["VAE 解码","视频"]);
+    const ad=rect(sc,rx,y2,hw,46,"io",["VAE 解码","音频"]);
     edge(sc,[vfrom,top(vd)]);edge(sc,[[rx+hw/2,hb],top(ad)]);
   }else{
     node(["RMSNorm → LM Head",sdim+" 维 → 词表 logits"],"io");
@@ -389,14 +389,15 @@ function buildB(c){
   const x0=bus?190:150, cx=x0+CW/2, mixW=150, skipX=bus?x0-26-mixW/2:x0-30;
   const wide=bus?{color:G,w:3.6,marker:"g"}:null, wideNA=bus?{color:G,w:3.6,noArrow:true}:{noArrow:true};
   const wlab=mhc?N+" × "+c.d:"D′ = "+Math.round(c.vn/c.vm*c.d);
-  const stream=!bus?"x · "+c.d+" 维":mhc?N+" 条残差流 · 每条 "+c.d+" 维":"over-width 隐状态 · "+N+" 段 × "+Math.round(c.d/c.vm)+" 维";
+  const stream=!bus?c.d+" 维":mhc?N+" 条流 × "+c.d+" 维":N+" 段 × "+Math.round(c.d/c.vm)+" 维";
   const inR=rect(sc,x0,0,CW,lh(2),"io",["第 ℓ 层输入",stream]);
   let from=[cx,inR.h], moeR=null, first=true, coefDone=false;
-  const pre=mhc?{lines:["Pre Mapping · H_pre","x = Σ H_pre[i] · 流 i（"+N+" → 1）","H_pre = σ(·)，每条流一个权重"],kind:"res"}
-               :{lines:["GHC 读入 · Å","x = Å · H′（"+N+" 段 → 骨干的 "+c.vm+" 段）"],kind:"res"};
-  const post=mhc?{lines:["Post Mapping · H_post","流 i ＋= H_post[i] · F(x)（1 → "+N+"）","H_post = 2σ(·)，每条流一个权重"],kind:"res"}
-                :{lines:["GHC 写回 · B","H′ ＋= B · F(x)（"+c.vm+" 段 → "+N+" 段）"],kind:"res"};
-  const mixL=mhc?["Res Mapping · H_res","流 ← H_res · 流",N+"×"+N+" 双随机矩阵","Sinkhorn-Knopp × 20"]:["GHC 跨层传递 · Â","H′ ← Â · H′",N+"×"+N+" 段间混合","宽状态不经过子层"];
+  /* 三步：读（宽状态 → 子层输入）、写（子层输出 → 宽状态）、传（宽状态绕过子层直接往下传） */
+  const pre=mhc?{lines:["读 · H_pre",N+" 条流加权合成 1 路"],kind:"res"}
+               :{lines:["读 · Å",N+" 段取出骨干用的 "+c.vm+" 段"],kind:"res"};
+  const post=mhc?{lines:["写 · H_post","子层输出加回 "+N+" 条流"],kind:"res"}
+                :{lines:["写 · B","子层输出加回 "+N+" 段"],kind:"res"};
+  const mixL=mhc?["传 · H_res",N+" 条流互相混合","不经过子层"]:["传 · Â",N+" 段互相混合","不经过子层"];
   /* mode: main = 注意力/MoE；side = 自定义子层；direct = 直接读写宽状态（Engram 在多流下逐流门控、逐流加回） */
   function unit(core,mode,normLabel){
     const main=mode==="main", wrap=bus&&mode!=="direct", boxes=[];
@@ -412,8 +413,8 @@ function buildB(c){
     const py=yy+8;edge(sc,[bot(p),[cx,py-9]],wide);
     if(mhc&&main&&R.pre&&R.post&&!coefDone){coefDone=true;
       /* 三个映射的系数不是固定参数：每个 token 由当前的全部流现算 */
-      const kw=176, kx=x0+CW+26, kh=lh(5), ky=(R.pre.y+R.post.y+R.post.h)/2-kh/2, dz={dashed:true,color:G};
-      const k=rect(sc,kx,ky,kw,kh,"res",["系数按 token 现算",N+" 条流拼成 "+N*c.d+" 维","→ RMSNorm → 线性层","→ H_pre、H_post、H_res","每个子层各算一套"]);
+      const kw=176, kx=x0+CW+26, kh=lh(2), ky=(R.pre.y+R.post.y+R.post.h)/2-kh/2, dz={dashed:true,color:G};
+      const k=rect(sc,kx,ky,kw,kh,"res",["三个 H 不是固定参数","每个 token 由当前的流现算"]);
       edge(sc,[[kx+kw/2,ky],[kx+kw/2,R.pre.y+R.pre.h/2],[x0+CW,R.pre.y+R.pre.h/2]],dz);
       edge(sc,[[kx+kw/2,ky+kh],[kx+kw/2,R.post.y+R.post.h/2],[x0+CW,R.post.y+R.post.h/2]],dz);
     }
@@ -435,14 +436,13 @@ function buildB(c){
     const t=rect(sc,x0+CW+28,e.y+e.h/2-14,82,28,"io",["token IDs"],{small:true});
     edge(sc,[[t.x,t.y+14],[x0+CW,e.y+e.h/2]]);
   }
-  const aL=["Self-Attention","QKV → QK-Norm → "+(c.dit?"3D RoPE（t, h, w）":"RoPE"),
-    c.ah+" 头 × "+Math.round(c.d/c.ah)+" 维 · "+(c.dit?"全序列双向":"因果")]
-    .concat(c.sink?["每头 1 个可学习 sink"]:[],[c.gate?"每头 sigmoid 门 → 输出投影":"输出投影"],c.dit?[c.nq>=c.L?"QKV 每模态一套":c.mqe>c.dense?"QKV：两端各 "+c.mqe+" 层每模态一套":"QKV 所有模态共用一套"]:[]);
+  const aL=["Self-Attention",c.ah+" 头 × "+Math.round(c.d/c.ah)+" 维"]
+    .concat(c.sink||c.gate?[(c.sink?"可学习 sink":"")+(c.sink&&c.gate?" · ":"")+(c.gate?"输出门":"")]:[]);
   unit({lines:aL,kind:"attn"},"main");
   cust("mid");
   const mL=["Multi-Head LatentMoE",c.M+" 头 × "+c.E+" 专家 · 每头 Top-"+c.k];
-  const nsh=c.shared+c.mshared;if(nsh)mL.push("并联相加："+(c.shared?"共享专家":"")+(c.shared&&c.mshared?" ＋ ":"")+(c.mshared?"模态专家":""));
-  moeR=unit({lines:mL,kind:"moe"},"main",c.dit?"RMSNorm（每模态一套）":"RMSNorm");
+  const nsh=c.shared+c.mshared;if(nsh)mL.push("＋ "+(c.shared?"共享专家":"")+(c.shared&&c.mshared?"、":"")+(c.mshared?"模态专家":""));
+  moeR=unit({lines:mL,kind:"moe"},"main",c.dit?"RMSNorm · 按模态":"RMSNorm");
   cust("post");
   const out=rect(sc,x0,from[1]+22,CW,lh(2),"io",["第 ℓ+1 层输入",stream]);
   edge(sc,[from,top(out)],wide);
@@ -500,10 +500,10 @@ function buildC(c){
   const totalW=Math.max(x-gap,230), Cx=totalW/2, off=(totalW-(x-gap))/2;
   const inR=rect(sc,Cx-72,0,144,lh(2),"io",["MoE 输入 x",c.d+" 维"]);
   let y=inR.h+20;
-  const nr=rect(sc,Cx-100,y,200,24,"norm",[c.dit?"RMSNorm（每模态一套）":"RMSNorm"],{small:true});
+  const nr=rect(sc,Cx-100,y,200,24,"norm",[c.dit?"RMSNorm · 按模态":"RMSNorm"],{small:true});
   edge(sc,[bot(inR),top(nr)]);y+=nr.h+22;
   const routed=c.M*c.dh;
-  const win=rect(sc,0,y,totalW,lh(2),"moe",["split_linear，再按 head 切开",c.d+" → "+routed+" = "+c.M+" 头 × "+c.dh+" 维"]);
+  const win=rect(sc,0,y,totalW,lh(2),"moe",["split_linear → 切成 "+c.M+" 段",c.d+" → "+c.M+" × "+c.dh]);
   edge(sc,[bot(nr),top(win)]);y+=win.h+26;
   /* 每个 head 画一小片专家格子：亮的是 Router 选中的，各 head 选的不一样；格子数和亮的个数是示意，不是全量 */
   const PER=10, S=Math.min(c.E,30), R=Math.ceil(S/PER), on=Math.min(c.k,c.E<=30?c.E:Math.floor(S/3)), more=c.E>S;
@@ -523,15 +523,13 @@ function buildC(c){
     edge(sc,[[ccx,sy+gridH+21],top(sm)]);sums.push(sm);
   });
   const hy=y;y+=hh+26;
-  const wout=rect(sc,0,y,totalW,lh(2),"moe",["按 head 拼回 → merge_linear",routed+" → "+c.d]);
+  const wout=rect(sc,0,y,totalW,lh(2),"moe",["拼回 → merge_linear",c.M+" × "+c.dh+" → "+c.d]);
   sums.forEach(s=>edge(sc,[bot(s),[s.x+s.w/2,wout.y]]));
   let from=bot(wout);
   const nsh=c.shared+c.mshared;
   if(nsh){
-    const io=c.d+" → "+c.eh+" → "+c.d, lines=["共享专家（与路由专家并联）"];
-    if(c.shared)lines.push("全局 × "+c.shared+"：所有 token 都走");
-    if(c.mshared)lines.push("模态专属：每模态 "+c.mshared+" 个","token 只走自己模态的那个");
-    lines.push("各为 "+io,"不经路由，始终参与");
+    const lines=[(c.shared?"共享专家":"")+(c.shared&&c.mshared?" ＋ ":"")+(c.mshared?"模态专家":""),"不经路由，每个 token 都算"];
+    if(c.mshared)lines.push("模态专家只走自己模态的");
     const sw=190, sh=lh(lines.length), sr=rect(sc,totalW+34,hy+(hh-sh)/2,sw,sh,"shared",lines), scx=sr.x+sw/2;
     const py=wout.y+wout.h+26, ny=nr.y+nr.h/2;plus(sc,Cx,py);edge(sc,[bot(wout),[Cx,py-9]]);
     edge(sc,[[nr.x+nr.w,ny],[scx,ny],[scx,sr.y]]);
@@ -576,8 +574,8 @@ const FONT="'Helvetica Neue',Helvetica,Arial,'PingFang SC','Microsoft YaHei','No
 function compose(c){
   const panels=[];
   if(c.showA){const a=buildA(c);panels.push(Object.assign(a,{id:"A",title:"整体架构",sub:(c.dit?"MAGI-2 Preview":"MAGI-2 底座 · 语言模型形态")+" · "+c.L+" 层 · 宽度 "+c.d}));}
-  if(c.showB){const b=buildB(c);panels.push(Object.assign(b,{id:"B",title:"单层 Block 展开",sub:"MoE 层（"+rng(c.moeA,c.moeB)+"）· "+(c.res==="std"?"每个子层：x ← x + F(x)":c.res==="mhc"?"每个子层：x ← H_res·x + H_post·F(H_pre·x)；三个 H 都由 RMSNorm(全部流) → 线性层按 token 现算":"每个子层：H′ ← Â·H′ + B·F(Å·H′)；F 只在骨干宽度 D 上计算")}));}
-  if(c.showC){const m=buildC(c);panels.push(Object.assign(m,{id:"C",title:"Multi-Head LatentMoE 展开",sub:"每个路由专家："+c.dh+" → "+c.eh+" → "+c.dh+" · SwiGLU7"}));}
+  if(c.showB){const b=buildB(c);panels.push(Object.assign(b,{id:"B",title:"单层 Block 展开",sub:c.res==="std"?"每个子层：x ← x + F(x)":c.res==="mhc"?"每个子层：流 ← H_res·流 + H_post·F(H_pre·流)":"每个子层：H′ ← Â·H′ + B·F(Å·H′)"}));}
+  if(c.showC){const m=buildC(c);panels.push(Object.assign(m,{id:"C",title:"Multi-Head LatentMoE 展开",sub:"每个专家："+c.dh+" → "+c.eh+" → "+c.dh}));}
   if(c.showD&&c.engram&&c.engL.length)panels.push(Object.assign(buildD(c),{id:"D",title:"Engram 展开",sub:"查表 → 上下文门控 → 卷积 → 加回残差流"}));
   if(c.showD&&c.oe)panels.push(Object.assign(buildE(c),{id:"E",title:"Over-Encoding 展开",sub:"只改输入嵌入，输出词表不变"}));
   const all=Scene();let ox=0;
