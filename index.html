@@ -101,14 +101,14 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
     </div>
     <div class="grid">
       <label class="f">总层数<input type="number" id="f-L" data-k="L" min="3" max="200"></label>
-      <label class="f">两端 Dense FFN 层数（每端）<input type="number" id="f-dense" data-k="dense" min="0" max="50"></label>
-      <label class="f wide" data-if="mode=dit">MoT 层数：QKV 按模态各一套（每端；填到总层数的一半即全部层）<input type="number" id="f-mq" data-k="mq" min="0" max="200"></label>
+      <label class="f">MoT FFN 层数（每端）<input type="number" id="f-dense" data-k="dense" min="0" max="50"></label>
+      <label class="f wide" data-if="mode=dit">MoT QKV 层数（每端；填到总层数的一半即全部层）<input type="number" id="f-mq" data-k="mq" min="0" max="200"></label>
       <label class="f">隐藏维度 d<input type="number" id="f-d" data-k="d" min="64" step="64"></label>
       <label class="f">注意力头数<input type="number" id="f-ah" data-k="ah" min="1" max="256"></label>
     </div>
     <label class="chk"><input type="checkbox" id="f-sink" data-k="sink">学习型 attention sink</label>
     <label class="chk"><input type="checkbox" id="f-gate" data-k="gate">注意力输出 sigmoid 门</label>
-    <label class="chk" data-if="mode=dit"><input type="checkbox" id="f-motf" data-k="motF">两端 Dense FFN 也按模态各一套</label>
+    <label class="chk" data-if="mode=dit"><input type="checkbox" id="f-motf" data-k="motF">两端 FFN 按模态各一套（关掉就是普通 Dense FFN）</label>
     <label class="chk" data-if="mode=dit"><input type="checkbox" id="f-refiner" data-k="refiner">1080p Refiner 阶段</label>
   </section>
 
@@ -309,7 +309,7 @@ function buildA(c){
     s=s.concat(cu("mid"));
     const nsh=c.shared+c.mshared;
     s.push(isMoe?{lines:["Multi-Head LatentMoE",c.M+" 头 × "+c.E+" 专家 · 每头 Top-"+c.k].concat(nsh?["＋ "+(c.shared?"共享专家":"")+(c.shared&&c.mshared?"、":"")+(c.mshared?"模态专家":"")]:[]),kind:"moe",mix:true}
-                :motFF?{lines:[],cap:"Dense FFN "+c.d+"→"+c.ffnI+"→"+c.d,tri:["视频 FFN","音频 FFN","文本 FFN"],kind:"dense",mix:true,h:72}
+                :motFF?{lines:[],cap:"FFN "+c.d+"→"+c.ffnI+"→"+c.d,tri:["视频 FFN","音频 FFN","文本 FFN"],kind:"dense",mix:true,h:72}
                 :{lines:["Dense FFN",c.d+" → "+c.ffnI+" → "+c.d+" · SwiGLU"],kind:"dense",mix:true});
     return s.concat(cu("post"));
   };
@@ -555,7 +555,7 @@ function shift(sc,dx,dy){
 
 const KIND={
   io:{fill:"#F2F3F6",stroke:"#6B7280",name:"输入 / 输出"},
-  dense:{fill:"#E3E7EE",stroke:"#4B5563",name:"Dense FFN"},
+  dense:{fill:"#E3E7EE",stroke:"#4B5563",name:"FFN"},
   attn:{fill:"#DCE8FB",stroke:"#2F5FB3",name:"注意力"},
   moe:{fill:"#FCE9C8",stroke:"#B7791F",name:"MoE 路由与专家"},
   shared:{fill:"#FFF6DF",stroke:"#B7791F",name:"共享专家"},
