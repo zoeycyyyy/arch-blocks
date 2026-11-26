@@ -279,9 +279,9 @@ function buildA(c){
     if(bus&&!from&&!busTo&&pre)busTo=r;from=bot(r);y+=h+GAP;return r;};
   let pre=null, pack=null;
   if(c.dit){
-    const bw=(MW-20)/3, ins=[["视频 latent","48 通道"],["音频 latent","64 通道"],["文本特征","5120 维"]]
-      .map((l,i)=>rect(sc,MX+i*(bw+10),y,bw,lh(2),"io",l));
-    y+=lh(2)+GAP;
+    const bw=(MW-20)/3, ins=[["视频 latent","Wan2.2 VAE","48 通道"],["音频 latent","Stable Audio","64 通道"],["文本特征","Qwen3.5-27B","5120 维"]]
+      .map((l,i)=>rect(sc,MX+i*(bw+10),y,bw,lh(3),"io",l));
+    y+=lh(3)+GAP;
     const pk=rect(sc,MX,y,MW,lh(2),"io",["拼成一条序列","视频 → 音频 → 文本"]);
     ins.forEach(r=>edge(sc,[bot(r),[r.x+r.w/2,pk.y]]));
     pack=pk;from=bot(pk);y+=pk.h+GAP;
@@ -357,8 +357,8 @@ function buildA(c){
     const hw=(MW-12)/2, lx=MX, rx=MX+hw+12, hb=smp.y+smp.h;let y2=y, vfrom=[lx+hw/2,hb];
     if(c.refiner){const rf=rect(sc,lx,y,hw,lh(4),"dense",["Refiner（另一套权重）","latent 上采样 + 重新加噪","30 层 · 宽 4096 · 5 步","普通残差 · 局部窗口注意力"]);
       edge(sc,[vfrom,top(rf)]);vfrom=bot(rf);y2=y+rf.h+GAP;}
-    const vd=rect(sc,lx,y2,hw,46,"io",["VAE 解码","视频"]);
-    const ad=rect(sc,rx,y2,hw,46,"io",["VAE 解码","音频"]);
+    const vd=rect(sc,lx,y2,hw,46,"io",["TurboVAE 解码",c.refiner?"视频 1088×1920 · 25 fps":"视频 512×896 · 12.5 fps"]);
+    const ad=rect(sc,rx,y2,hw,46,"io",["Stable Audio VAE 解码","音频 44.1 kHz"]);
     edge(sc,[vfrom,top(vd)]);edge(sc,[[rx+hw/2,hb],top(ad)]);
   }else{
     node(["RMSNorm → LM Head",sdim+" 维 → 词表 logits"],"io");
